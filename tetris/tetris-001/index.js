@@ -117,6 +117,13 @@ function render() {
   const view = mergeBoardWithPiece();
   drawBoard(view, BOARD_X + 1, BOARD_Y + 1);
 
+  // Draw info panel border
+  const infoWidth = 17;
+  const infoHeight = 10;
+  drawBorder(INFO_X, INFO_Y, infoWidth, infoHeight);
+
+  resetColor();
+
   const infoLines = [
     `Score: ${score}`,
     `Lines: ${lines}`,
@@ -131,12 +138,14 @@ function render() {
   ];
 
   infoLines.forEach((line, i) => {
-    process.stdout.write(`\x1b[${INFO_Y + 1 + i};${INFO_X + 1}H${line}`);
+    process.stdout.write(`\x1b[${INFO_Y + 2 + i};${INFO_X + 2}H${line}`);
   });
 
   if (gameOver) {
     const msg = 'GAME OVER';
-    process.stdout.write(`\x1b[${BOARD_Y + 1 + Math.floor(ROWS / 2)};${BOARD_X + 1 + Math.floor((COLS - msg.length) / 2)}H${msg}`);
+    const msgCol = BOARD_X + 2 + Math.floor((COLS - msg.length) / 2);
+    const msgRow = BOARD_Y + 1 + Math.floor(ROWS / 2);
+    process.stdout.write(`\x1b[${msgRow + 1};${msgCol + 1}H\x1b[7m${msg}\x1b[0m`);
   }
 
   resetColor();
