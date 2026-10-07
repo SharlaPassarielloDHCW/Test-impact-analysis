@@ -7,4 +7,4 @@
 - [x] Implement user input (move left/right, rotate, drop, quit)
 - [x] Implement line clearing and scoring
 - [x] Add borders, score display, controls, and game-over message
-- [ ] Wire `npm start` entry point and verify ≤24 rows
+- [x] Wire `npm start` entry point and verify ≤24 rows
