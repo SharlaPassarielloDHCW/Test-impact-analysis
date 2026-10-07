@@ -15,6 +15,7 @@
     <PackageReference Include="NUnit" Version="4.5.1" PrivateAssets="all" />
     <PackageReference Include="NUnit3TestAdapter" Version="6.1.0" PrivateAssets="all" />
     <Compile Include="Steps/**/*.cs" />
+    <ProjectReference Include="src/Factory.csproj" ReferenceOutputAssembly="false" />
     <None Update="reqnroll.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
