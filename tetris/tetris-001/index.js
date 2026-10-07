@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 const { clearScreen, drawBorder, drawBoard, createEmptyBoard, resetColor } = require('./display');
+const { createPiece } = require('./pieces');
 
 const BOARD_X = 2;
 const BOARD_Y = 1;
@@ -7,6 +8,7 @@ const INFO_X = 16;
 const INFO_Y = 1;
 
 let board = createEmptyBoard();
+let currentPiece = createPiece('T', 3, 0);
 let running = true;
 let score = 0;
 let lines = 0;
