@@ -124,11 +124,41 @@ process.stdin.setRawMode(true);
 process.stdin.setEncoding('utf8');
 process.stdin.resume();
 process.stdin.on('data', (key) => {
-  if (key === '\u0003') {
+  if (key === '\u0003' || key === 'q' || key === 'Q') {
     process.exit();
   }
-  if (key === 'q') {
-    process.exit();
+  if (!running || gameOver || !currentPiece) {
+    return;
+  }
+
+  if (key === '\u001b[D' || key === 'a' || key === 'A') {
+    const moved = { ...currentPiece, x: currentPiece.x - 1 };
+    if (!collides(moved)) currentPiece = moved;
+  } else if (key === '\u001b[C' || key === 'd' || key === 'D') {
+    const moved = { ...currentPiece, x: currentPiece.x + 1 };
+    if (!collides(moved)) currentPiece = moved;
+  } else if (key === '\u001b[A' || key === 'w' || key === 'W') {
+    const rotated = { ...currentPiece, rotation: currentPiece.rotation + 1 };
+    if (!collides(rotated)) currentPiece = rotated;
+  } else if (key === '\u001b[B' || key === 's' || key === 'S') {
+    const moved = { ...currentPiece, y: currentPiece.y + 1 };
+    if (!collides(moved)) {
+      currentPiece = moved;
+    } else {
+      lockPiece(currentPiece);
+      spawnPiece();
+    }
+  } else if (key === ' ') {
+    while (true) {
+      const moved = { ...currentPiece, y: currentPiece.y + 1 };
+      if (!collides(moved)) {
+        currentPiece = moved;
+      } else {
+        break;
+      }
+    }
+    lockPiece(currentPiece);
+    spawnPiece();
   }
   render();
 });
