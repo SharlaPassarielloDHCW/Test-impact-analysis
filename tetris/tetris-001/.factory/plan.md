@@ -1,6 +1,6 @@
 # Plan: Tetris Terminal Game
 
-- [ ] Initialize npm project with `npm init -y` and create `start` script
+- [x] Initialize npm project with `npm init -y` and create `start` script
 - [ ] Set up terminal UI framework or raw ANSI rendering (≤24 rows)
 - [ ] Implement Tetris board grid and piece data structures
 - [ ] Implement piece spawning and gravity loop
