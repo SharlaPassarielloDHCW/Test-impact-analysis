@@ -5,6 +5,6 @@
 - [x] Implement Tetris board grid and piece data structures
 - [x] Implement piece spawning and gravity loop
 - [x] Implement user input (move left/right, rotate, drop, quit)
-- [ ] Implement line clearing and scoring
+- [x] Implement line clearing and scoring
 - [ ] Add borders, score display, controls, and game-over message
 - [ ] Wire `npm start` entry point and verify ≤24 rows

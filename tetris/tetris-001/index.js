@@ -31,6 +31,27 @@ function collides(piece) {
   return false;
 }
 
+function clearLines() {
+  let cleared = 0;
+  for (let r = ROWS - 1; r >= 0; r--) {
+    if (board[r].every(cell => cell !== 'empty')) {
+      board.splice(r, 1);
+      board.unshift(Array(COLS).fill('empty'));
+      cleared++;
+      r++;
+    }
+  }
+  if (cleared > 0) {
+    const points = [0, 40, 100, 300, 1200];
+    score += points[cleared] * level;
+    lines += cleared;
+    level = Math.floor(lines / 10) + 1;
+    if (gameInterval) clearInterval(gameInterval);
+    const speed = Math.max(100, 500 - (level - 1) * 50);
+    gameInterval = setInterval(tick, speed);
+  }
+}
+
 function lockPiece(piece) {
   const shape = getShape(piece.type, piece.rotation);
   for (let r = 0; r < shape.length; r++) {
@@ -44,6 +65,7 @@ function lockPiece(piece) {
       }
     }
   }
+  clearLines();
 }
 
 function spawnPiece() {
