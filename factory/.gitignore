@@ -1,1 +1,4 @@
 jobs/
+**/bin/
+**/obj/
+TestResults/

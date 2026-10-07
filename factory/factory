@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+factory_dir=$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")
+dotnet_command=$(command -v dotnet || printf '%s/.dotnet/dotnet' "$HOME")
+exec "$dotnet_command" run --project "$factory_dir/src/Factory.csproj" -- "$@"

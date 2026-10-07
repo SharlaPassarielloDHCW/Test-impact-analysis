@@ -27,3 +27,8 @@ Skills, in `.agents/skills/` at the repository's root:
 - **implement-fast** — when the student wants you to just build the iteration.
 
 If your harness doesn't load skills, read the skill's `SKILL.md` and follow it.
+
+## Checks
+
+From `factory/`, run `dotnet test` (excludes `@real-agent`); explicitly run real agents with `dotnet test --settings real-agent.runsettings`.
+The project uses .NET 10; if it is not on PATH, use `$HOME/.dotnet/dotnet`.
