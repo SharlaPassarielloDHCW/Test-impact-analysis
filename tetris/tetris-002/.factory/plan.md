@@ -1,4 +1,4 @@
-- [ ] Initialize npm project with `npm start` entry point; optionally add terminal rendering/control packages.
+- [x] Initialize npm project with `npm start` entry point; optionally add terminal rendering/control packages.
   - [x] Extract terminal I/O from top-level into an exported function to enable testability
   - [x] renderStartup hardcodes side effects by writing directly to process.stdout and calling console.log; extract string generation from the I/O so the function returns the rendered content
   - [x] game.js: spawnPiece (and tick) embeds Math.random() via the closed-over randomType() helper; inject a random source
