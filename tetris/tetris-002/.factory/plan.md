@@ -5,6 +5,6 @@
   - [x] display.js: cellString invokes the global chalk import directly; renderGameState should accept an optional chalk instance for stable test output
 - [x] Implement board, borders, score, and controls display, keeping total height within 24 terminal rows.
 - [x] Implement Tetrimino shapes, spawning, movement, dropping, and rotation with wall kicks.
-- [ ] Implement line clearing, scoring, level speed-up, and terminal input handling.
-  - [ ] Add line clearing after piece locks and update scoring/level based on lines cleared
-  - [ ] Add terminal keyboard input handling (left/right/move, rotate, soft/hard drop, quit)
+- [x] Implement line clearing, scoring, level speed-up, and terminal input handling.
+  - [x] Add line clearing after piece locks and update scoring/level based on lines cleared
+  - [x] Add terminal keyboard input handling (left/right/move, rotate, soft/hard drop, quit)
