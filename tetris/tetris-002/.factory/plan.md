@@ -1,4 +1,8 @@
 - [ ] Initialize npm project with `npm start` entry point; optionally add terminal rendering/control packages.
+  - [x] Extract terminal I/O from top-level into an exported function to enable testability
+  - [x] renderStartup hardcodes side effects by writing directly to process.stdout and calling console.log; extract string generation from the I/O so the function returns the rendered content
+  - [x] game.js: spawnPiece (and tick) embeds Math.random() via the closed-over randomType() helper; inject a random source
+  - [x] display.js: cellString invokes the global chalk import directly; renderGameState should accept an optional chalk instance for stable test output
 - [ ] Implement board, borders, score, and controls display, keeping total height within 24 terminal rows.
 - [ ] Implement Tetrimino shapes, spawning, movement, dropping, and rotation with wall kicks.
 - [ ] Implement line clearing, scoring, level speed-up, and game-over detection with terminal input handling.
