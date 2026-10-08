@@ -1,0 +1,4 @@
+- [ ] Initialize npm project with `npm start` entry point; optionally add terminal rendering/control packages.
+- [ ] Implement board, borders, score, and controls display, keeping total height within 24 terminal rows.
+- [ ] Implement Tetrimino shapes, spawning, movement, dropping, and rotation with wall kicks.
+- [ ] Implement line clearing, scoring, level speed-up, and game-over detection with terminal input handling.
