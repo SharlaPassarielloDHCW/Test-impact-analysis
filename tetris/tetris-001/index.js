@@ -151,49 +151,101 @@ function render() {
   resetColor();
 }
 
-process.stdin.setRawMode(true);
-process.stdin.setEncoding('utf8');
-process.stdin.resume();
-process.stdin.on('data', (key) => {
-  if (key === '\u0003' || key === 'q' || key === 'Q') {
-    process.exit();
-  }
-  if (!running || gameOver || !currentPiece) {
-    return;
-  }
+// Detect non-TTY environment (e.g. agent/cli without stdin)
+const isTty = process.stdin.isTTY;
+const isDemo = process.argv.includes('--demo') || process.argv.includes('--watch');
+const runInteractive = isTty && !isDemo;
 
-  if (key === '\u001b[D' || key === 'a' || key === 'A') {
-    const moved = { ...currentPiece, x: currentPiece.x - 1 };
-    if (!collides(moved)) currentPiece = moved;
-  } else if (key === '\u001b[C' || key === 'd' || key === 'D') {
-    const moved = { ...currentPiece, x: currentPiece.x + 1 };
-    if (!collides(moved)) currentPiece = moved;
-  } else if (key === '\u001b[A' || key === 'w' || key === 'W') {
-    const rotated = { ...currentPiece, rotation: currentPiece.rotation + 1 };
-    if (!collides(rotated)) currentPiece = rotated;
-  } else if (key === '\u001b[B' || key === 's' || key === 'S') {
-    const moved = { ...currentPiece, y: currentPiece.y + 1 };
-    if (!collides(moved)) {
-      currentPiece = moved;
-    } else {
-      lockPiece(currentPiece);
-      spawnPiece();
+let autoplayInterval = null;
+let moveCount = 0;
+const maxMovesIndex = process.argv.indexOf('--moves');
+const maxMoves = maxMovesIndex >= 0 ? parseInt(process.argv[maxMovesIndex + 1], 10) || 0 : 0;
+
+
+if (runInteractive) {
+  process.stdin.setRawMode(true);
+  process.stdin.setEncoding('utf8');
+  process.stdin.resume();
+  process.stdin.on('data', (key) => {
+    if (key === '\u0003' || key === 'q' || key === 'Q') {
+      process.exit();
     }
-  } else if (key === ' ') {
-    while (true) {
+    if (!running || gameOver || !currentPiece) {
+      return;
+    }
+
+    if (key === '\u001b[D' || key === 'a' || key === 'A') {
+      const moved = { ...currentPiece, x: currentPiece.x - 1 };
+      if (!collides(moved)) currentPiece = moved;
+    } else if (key === '\u001b[C' || key === 'd' || key === 'D') {
+      const moved = { ...currentPiece, x: currentPiece.x + 1 };
+      if (!collides(moved)) currentPiece = moved;
+    } else if (key === '\u001b[A' || key === 'w' || key === 'W') {
+      const rotated = { ...currentPiece, rotation: currentPiece.rotation + 1 };
+      if (!collides(rotated)) currentPiece = rotated;
+    } else if (key === '\u001b[B' || key === 's' || key === 'S') {
       const moved = { ...currentPiece, y: currentPiece.y + 1 };
       if (!collides(moved)) {
         currentPiece = moved;
       } else {
-        break;
+        lockPiece(currentPiece);
+        spawnPiece();
       }
+    } else if (key === ' ') {
+      while (true) {
+        const moved = { ...currentPiece, y: currentPiece.y + 1 };
+        if (!collides(moved)) {
+          currentPiece = moved;
+        } else {
+          break;
+        }
+      }
+      lockPiece(currentPiece);
+      spawnPiece();
     }
-    lockPiece(currentPiece);
-    spawnPiece();
-  }
-  render();
-});
+    render();
+  });
+}
 
 spawnPiece();
 render();
 gameInterval = setInterval(tick, 500);
+
+if (!runInteractive) {
+  // Demo/autoplay mode: feed random deterministic-ish moves without raw mode
+  function autoplay() {
+    if (!running || gameOver || !currentPiece) {
+      clearInterval(autoplayInterval);
+      return;
+    }
+    // Try rotation, drop, or move every tick
+    const choice = Math.random();
+    if (choice < 0.15) {
+      const rotated = { ...currentPiece, rotation: currentPiece.rotation + 1 };
+      if (!collides(rotated)) currentPiece = rotated;
+    } else if (choice < 0.3) {
+      const moved = { ...currentPiece, x: currentPiece.x - 1 };
+      if (!collides(moved)) currentPiece = moved;
+    } else if (choice < 0.45) {
+      const moved = { ...currentPiece, x: currentPiece.x + 1 };
+      if (!collides(moved)) currentPiece = moved;
+    } else if (choice < 0.55) {
+      // Hard drop
+      while (true) {
+        const moved = { ...currentPiece, y: currentPiece.y + 1 };
+        if (!collides(moved)) { currentPiece = moved; } else break;
+      }
+      lockPiece(currentPiece);
+      spawnPiece();
+    }
+    moveCount++;
+    if (maxMoves > 0 && moveCount >= maxMoves) {
+      clearInterval(autoplayInterval);
+      clearInterval(gameInterval);
+      process.stdout.write('\n\n--- Demo ended after ' + maxMoves + ' moves ---\n');
+      process.exit(0);
+    }
+    render();
+  }
+  autoplayInterval = setInterval(autoplay, 300);
+}
