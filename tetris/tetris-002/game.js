@@ -112,6 +112,46 @@ export function lockPiece(state) {
   return { ...state, board: newBoard, currentPiece: null };
 }
 
+export function clearLines(state) {
+  const newBoard = state.board.filter(row => row.some(cell => cell === 'empty'));
+  const linesCleared = ROWS - newBoard.length;
+  const emptyRows = Array.from({ length: linesCleared }, () => Array(COLS).fill('empty'));
+  const board = [...emptyRows, ...newBoard];
+
+  const newLines = state.lines + linesCleared;
+  const newLevel = Math.floor(newLines / 10) + 1;
+
+  const lineScores = [0, 40, 100, 300, 1200];
+  const newScore = state.score + (lineScores[linesCleared] || 0) * state.level;
+
+  return { ...state, board, lines: newLines, level: newLevel, score: newScore };
+}
+
+export function dropSpeedFor(level) {
+  const speeds = [1000, 900, 800, 700, 600, 500, 400, 300, 200, 100];
+  return speeds[Math.min(level - 1, speeds.length - 1)];
+}
+
+export function settlePiece(state, random = Math.random) {
+  return spawnPiece(clearLines(lockPiece(state)), random);
+}
+
+export function processInput(state, key, random = Math.random) {
+  if (state.gameOver) return { state, acted: false, quit: true };
+  if (key === 'q' || key === 'Q' || key === '\u0003') {
+    return { state, acted: false, quit: true };
+  }
+
+  let next = state;
+  if (key === '\u001B[D') next = movePiece(state, -1, 0);
+  else if (key === '\u001B[C') next = movePiece(state, 1, 0);
+  else if (key === '\u001B[A') next = rotatePiece(state);
+  else if (key === '\u001B[B') next = softDrop(state);
+  else if (key === ' ') next = settlePiece(hardDrop(state), random);
+
+  return { state: next, acted: next !== state, quit: false };
+}
+
 export function tick(state, random = Math.random) {
   if (state.gameOver) return state;
   if (!state.currentPiece) {
@@ -119,9 +159,7 @@ export function tick(state, random = Math.random) {
   }
   const dropped = movePiece(state, 0, 1);
   if (dropped === state) {
-    // Could not move down: lock and spawn
-    const locked = lockPiece(state);
-    return spawnPiece(locked, random);
+    return settlePiece(state, random);
   }
   return dropped;
 }

@@ -3,6 +3,8 @@
   - [x] renderStartup hardcodes side effects by writing directly to process.stdout and calling console.log; extract string generation from the I/O so the function returns the rendered content
   - [x] game.js: spawnPiece (and tick) embeds Math.random() via the closed-over randomType() helper; inject a random source
   - [x] display.js: cellString invokes the global chalk import directly; renderGameState should accept an optional chalk instance for stable test output
-- [ ] Implement board, borders, score, and controls display, keeping total height within 24 terminal rows.
-- [ ] Implement Tetrimino shapes, spawning, movement, dropping, and rotation with wall kicks.
-- [ ] Implement line clearing, scoring, level speed-up, and game-over detection with terminal input handling.
+- [x] Implement board, borders, score, and controls display, keeping total height within 24 terminal rows.
+- [x] Implement Tetrimino shapes, spawning, movement, dropping, and rotation with wall kicks.
+- [ ] Implement line clearing, scoring, level speed-up, and terminal input handling.
+  - [ ] Add line clearing after piece locks and update scoring/level based on lines cleared
+  - [ ] Add terminal keyboard input handling (left/right/move, rotate, soft/hard drop, quit)
