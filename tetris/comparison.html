@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tetris generations 001 and 002</title>
+  <style>
+    :root { color-scheme: dark; --ink:#e8edf2; --muted:#9aabb8; --panel:#121a22; --line:#2b3b48; --accent:#70d6b5; --warm:#ffc857; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:#091017; color:var(--ink); font:16px/1.55 system-ui,sans-serif; }
+    main { width:min(1120px,calc(100% - 32px)); margin:42px auto 70px; }
+    h1 { font-size:clamp(2rem,5vw,4rem); line-height:1; margin:0 0 14px; letter-spacing:-.04em; }
+    h2 { margin-top:42px; font-size:1.45rem; }
+    p { max-width:78ch; } .lede { color:var(--muted); font-size:1.1rem; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(310px,1fr)); gap:18px; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:22px; }
+    .tag { display:inline-block; color:#07110e; background:var(--accent); border-radius:999px; padding:3px 10px; font-weight:700; font-size:.78rem; }
+    .other { background:var(--warm); color:#1c1400; }
+    pre { overflow:auto; margin:14px 0 0; padding:16px; background:#050a0e; border-radius:9px; color:#d8e7ee; font:12px/1.25 ui-monospace,monospace; }
+    table { width:100%; border-collapse:collapse; background:var(--panel); }
+    th,td { text-align:left; vertical-align:top; padding:12px 14px; border:1px solid var(--line); }
+    th { color:var(--muted); } code { color:#b9f3df; }
+    li + li { margin-top:8px; }
+    .verdict { border-left:4px solid var(--accent); padding-left:18px; font-size:1.08rem; }
+  </style>
+</head>
+<body><main>
+  <span class="tag">Homework 002 · testability</span>
+  <h1>Two Tetris generations</h1>
+  <p class="lede">Both games came from the same seed. Generation 001 used the unvalidated loop. Generation 002 used a planner, doer, and validator, with testability as the validator lens.</p>
+
+  <h2>Result</h2>
+  <p class="verdict">Validation made a visible architectural difference: generation 002 separates pure game rules from terminal I/O and exports the rules for direct tests. Both versions remained playable. Generation 002 fills the 24-row allowance exactly; generation 001 uses 23 rows.</p>
+  <table>
+    <thead><tr><th>Check</th><th>Generation 001</th><th>Generation 002</th></tr></thead>
+    <tbody>
+      <tr><td>Startup</td><td><code>npm start</code> rendered successfully</td><td><code>npm start</code> rendered successfully</td></tr>
+      <tr><td>Controls exercised</td><td>left, right, rotate, soft drop, hard drop</td><td>left, right, rotate, soft drop, hard drop</td></tr>
+      <tr><td>Game over</td><td>Reached</td><td>Reached</td></tr>
+      <tr><td>Quit</td><td>Exit 0</td><td>Exit 0</td></tr>
+      <tr><td>Occupied terminal rows</td><td>23</td><td>24</td></tr>
+      <tr><td>Game-rule API</td><td>Rules closed over mutable terminal state</td><td>20 exported functions, including pure state transitions</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Captured startup displays</h2>
+  <div class="grid">
+    <section class="card"><h3>Generation 001</h3><pre>  ┌──────────┐  ┌─────────────────┐
+  │          │  │Score: 0         │
+  │          │  │Lines: 0         │
+  │          │  │Level: 1         │
+  │    ██    │  │                 │
+  │   ██     │  │Controls:        │
+  │          │  │← → : Move       │
+  │          │  │↑   : Rotate     │
+  │          │  │↓   : Soft drop  │
+  │          │  │Space: Hard drop │
+  │          │  │Q   : Quit       │
+  │          │  └─────────────────┘
+  │          │
+  │          │
+  │          │
+  │          │
+  │          │
+  │          │
+  │          │
+  │          │
+  │          │
+  └──────────┘</pre></section>
+    <section class="card"><h3>Generation 002</h3><pre>┌────────────────────┐  ┌──────────────────┐
+│                    │  │ Score: 0         │
+│      ████████      │  │ Lines: 0         │
+│                    │  │ Level: 1         │
+│                    │  │                  │
+│                    │  │ Next:            │
+│                    │  │                  │
+│                    │  │ ████████         │
+│                    │  │                  │
+│                    │  │                  │
+│                    │  │ Controls:        │
+│                    │  │ ← → : Move       │
+│                    │  │ ↑   : Rotate     │
+│                    │  │ ↓   : Soft       │
+│                    │  │       Drop       │
+│                    │  │ Space: Hard      │
+│                    │  │       Drop       │
+│                    │  │ Q   : Quit       │
+│                    │  │                  │
+│                    │  │                  │
+└────────────────────┘  └──────────────────┘</pre></section>
+  </div>
+
+  <h2>Differences supported by recorded validator findings</h2>
+  <div class="grid">
+    <section class="card"><span class="tag">Recorded finding</span><h3>Imports have no terminal side effects</h3><p>The plan records two iterations on startup rendering. Generation 002 now exports <code>renderStartup()</code>, returns rendered text, and writes it only when run as the entry point.</p></section>
+    <section class="card"><span class="tag">Recorded finding</span><h3>Randomness is injectable</h3><p>The plan records that <code>spawnPiece</code> and <code>tick</code> depended on <code>Math.random()</code>. They now accept a random source, allowing deterministic tests.</p></section>
+    <section class="card"><span class="tag">Recorded finding</span><h3>Styling can be deterministic</h3><p>The plan records reliance on the global Chalk instance. <code>renderGameState</code> now accepts a Chalk instance, so tests do not depend on terminal color detection.</p></section>
+    <section class="card"><span class="tag">Recorded finding</span><h3>Game rules are isolated</h3><p>Generation 002 has a separate <code>game.js</code>. Collision, movement, rotation, drops, line clearing, scoring, speed, settling, input decisions, and ticking are exported independently of terminal I/O.</p></section>
+  </div>
+
+  <h2>Other differences between generations</h2>
+  <ul>
+    <li><span class="tag other">Not tied to a finding</span> Generation 002 adds a next-piece preview, wall kicks, double-width cells, ESM modules, Chalk, and ansi-escapes.</li>
+    <li><span class="tag other">Not tied to a finding</span> The task breakdown differs: generation 001 used eight smaller tasks; generation 002 used four broader tasks.</li>
+    <li><span class="tag other">Local edit</span> The current generation 001 working copy contains uncommitted demo/autoplay behavior. The validator did not cause that difference, and it was preserved during this work.</li>
+    <li><span class="tag other">Inference</span> Two independent agent builds can vary even with the same seed, so display and dependency differences cannot be attributed to validation unless the plan records a related finding.</li>
+  </ul>
+
+  <h2>Recorded evidence</h2>
+  <p>Generation 002’s plan contains four explicit testability findings under its first task. All are marked resolved. The final plan is complete, the target is clean, and its work and plan are committed. The factory acceptance suite passed 39 of 39 non-real-agent examples.</p>
+</main></body></html>
