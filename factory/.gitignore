@@ -2,3 +2,4 @@ jobs/
 **/bin/
 **/obj/
 TestResults/
+runs/
