@@ -6,7 +6,7 @@
 
 ## Tasks
 
-- [ ] **Finish the CLI contract**
+- [x] **Finish the CLI contract**
   - Accept base and head commits, source subtree, and HTML report path.
   - Resolve paths against the containing Git repository and validate inputs.
   - Fail clearly without writing a success report when inputs or output are invalid.
