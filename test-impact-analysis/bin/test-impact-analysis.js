@@ -14,6 +14,54 @@ export class ValidationError extends Error {
   }
 }
 
+export function escapeHtml(text) {
+  if (!text) return '';
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+export function deriveJsonReportPath(htmlPath) {
+  return htmlPath.replace(/\.html?$/i, '') + '.json';
+}
+
+export function generateHtmlReport({ baseCommit, headCommit, sourcePath, changedFunctions = [], impactedFunctions = [], uncertainAreas = [] }) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>${escapeHtml('Code Impact Report')}</title>
+<style>
+body { font-family: sans-serif; margin: 2rem; }
+h1 { border-bottom: 1px solid #ccc; padding-bottom: 0.5rem; }
+</style>
+</head>
+<body>
+<h1>${escapeHtml('Code Impact Report')}</h1>
+<p><strong>${escapeHtml('Base commit:')}</strong> ${escapeHtml(baseCommit)}</p>
+<p><strong>${escapeHtml('Head commit:')}</strong> ${escapeHtml(headCommit)}</p>
+<p><strong>${escapeHtml('Source subtree:')}</strong> ${escapeHtml(sourcePath)}</p>
+<p>${escapeHtml('Full analysis implementation pending.')}</p>
+</body>
+</html>
+`;
+}
+
+export function generateJsonReport({ baseCommit, headCommit, sourcePath, reportPath, changedFunctions = [], impactedFunctions = [], uncertainAreas = [] }) {
+  return JSON.stringify({
+    baseCommit,
+    headCommit,
+    sourcePath,
+    reportPath,
+    changedFunctions,
+    impactedFunctions,
+    uncertainAreas,
+  }, null, 2);
+}
+
 export function parseCliArgs(argv) {
   const { values } = parseArgs({
     args: argv,
@@ -120,31 +168,45 @@ export async function runWorkflow({
 
   validateCommit(gitRoot, baseCommit, execGit);
   validateCommit(gitRoot, headCommit, execGit);
-  validatePathAtCommit(gitRoot, headCommit, sourcePath, execGit);
+
+  const resolvedSource = isAbsolute(sourcePath)
+    ? sourcePath
+    : resolve(gitRoot, sourcePath);
+  validatePathAtCommit(gitRoot, headCommit, resolvedSource, execGit);
 
   const absoluteReport = isAbsolute(reportPath)
     ? reportPath
     : resolve(gitRoot, reportPath);
-  await mkdirImpl(dirname(absoluteReport), { recursive: true });
 
-  // TODO: implement remaining logic in subsequent tasks:
-  // 2. Discover test inventory at head commit
-  // 3. Build static call graph
-  // 4. Detect changed production functions
-  // 5. Trace impact from tests to changed code
-  // 6. Generate Markdown report
+  try {
+    await mkdirImpl(dirname(absoluteReport), { recursive: true });
+  } catch (err) {
+    throw new ValidationError(`cannot write report to '${reportPath}': ${err.message}`);
+  }
 
-  const placeholderReport = `# Test Impact Analysis Report
+  const impactMap = {
+    baseCommit,
+    headCommit,
+    sourcePath: resolvedSource,
+    reportPath: absoluteReport,
+    changedFunctions: [],
+    impactedFunctions: [],
+    uncertainAreas: [],
+  };
 
-- **Base commit:** ${baseCommit}
-- **Head commit:** ${headCommit}
-- **Analyzed subtree:** ${sourcePath}
+  const htmlContent = generateHtmlReport(impactMap);
+  const jsonContent = generateJsonReport(impactMap);
+  const jsonPath = deriveJsonReportPath(absoluteReport);
 
-> Full analysis implementation pending (tasks 2–6).
-`;
+  try {
+    await writeFileImpl(absoluteReport, htmlContent, 'utf-8');
+    await writeFileImpl(jsonPath, jsonContent, 'utf-8');
+  } catch (err) {
+    throw new ValidationError(`cannot write report to '${reportPath}': ${err.message}`);
+  }
 
-  await writeFileImpl(absoluteReport, placeholderReport, 'utf-8');
-  log(`Report placeholder written to ${absoluteReport}`);
+  log(`Report written to ${absoluteReport}`);
+  log(`JSON map written to ${jsonPath}`);
 }
 
 export async function main({
@@ -152,11 +214,12 @@ export async function main({
   stderr = console.error,
   exit = process.exit,
   __dirname,
+  deps,
 } = {}) {
   const { baseCommit, headCommit, sourcePath, reportPath } = parseCliArgs(argv);
 
   try {
-    await runWorkflow({ baseCommit, headCommit, sourcePath, reportPath, toolDir: __dirname });
+    await runWorkflow({ baseCommit, headCommit, sourcePath, reportPath, toolDir: __dirname, deps });
   } catch (err) {
     if (err instanceof ValidationError) {
       stderr(`Error: ${err.message}`);
@@ -167,7 +230,7 @@ export async function main({
   }
 }
 
-if (import.meta.url.startsWith('file:')) {
+if (import.meta.url.startsWith('file:') && !process.env.NODE_TEST_CONTEXT) {
   const scriptPath = fileURLToPath(import.meta.url);
   if (process.argv[1] === scriptPath) {
     const __dirname = resolve(dirname(scriptPath), '..');

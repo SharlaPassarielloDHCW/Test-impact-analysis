@@ -10,6 +10,9 @@
   - Accept base and head commits, source subtree, and HTML report path.
   - Resolve paths against the containing Git repository and validate inputs.
   - Fail clearly without writing a success report when inputs or output are invalid.
+  - [x] Export `escapeHtml` and add targeted unit tests for HTML metacharacter escaping.
+  - [x] Extract JSON report path derivation into a named helper with isolated edge-case tests.
+  - [x] Strengthen `runWorkflow` success test to parse and assert JSON shape, and verify HTML escaping with malicious inputs.
 
 - [ ] **Locate changed production functions**
   - Compare the two commits within the source subtree.
