@@ -1,0 +1,15 @@
+{
+  "name": "test-impact-analysis",
+  "version": "1.0.0",
+  "description": "Recommend regression tests affected by a code change",
+  "type": "module",
+  "bin": {
+    "test-impact-analysis": "./bin/test-impact-analysis.js"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
