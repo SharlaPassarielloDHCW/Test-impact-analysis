@@ -48,8 +48,12 @@ public sealed class FactorySteps
         workspace = Path.Combine(Path.GetTempPath(), "factory-test-" + Guid.NewGuid());
         repo = Path.Combine(workspace, "repo");
         Directory.CreateDirectory(Path.Combine(repo, "factory"));
-        foreach (var file in Directory.GetFiles(Path.Combine(SourceRoot, "src/bin/Debug/net10.0")))
-            File.Copy(file, Path.Combine(repo, "factory", Path.GetFileName(file)));
+        foreach (var file in Directory.GetFiles(Path.Combine(SourceRoot, "src/bin/Debug/net10.0"), "*", SearchOption.AllDirectories))
+        {
+            var destination = Path.Combine(repo, "factory", Path.GetRelativePath(Path.Combine(SourceRoot, "src/bin/Debug/net10.0"), file));
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Copy(file, destination);
+        }
         Git("init", "-q"); Git("config", "user.name", "Factory Test"); Git("config", "user.email", "factory@example.test");
         Git("add", "."); Git("commit", "-qm", "Initial factory");
         Directory.CreateDirectory(Path.Combine(workspace, "agents"));
@@ -60,7 +64,12 @@ public sealed class FactorySteps
             if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }
         harness = Path.Combine(workspace, "agents");
+        foreach (var role in new[] { "planner", "doer", "validator" })
+            File.WriteAllText(Machine(role), JsonSerializer.Serialize(new { harness = Path.Combine(harness, role), lens = "testability" }));
+        Git("add", "factory/machines"); Git("commit", "-qm", "Test machine configuration");
     }
+    [Given("this assembly line:")]
+    public void AssemblyLine(string text) => File.WriteAllText(Line, text);
     [Given("a new target")]
     public void NewTarget() { target = Path.Combine(repo, "output"); Directory.CreateDirectory(target); }
     [Given("a seed describing a game of Tetris")]
@@ -71,21 +80,52 @@ public sealed class FactorySteps
     public void Doer() => behavior["do_next"] = true;
     [Given("the validator is always satisfied")]
     public void Validator() => behavior["validation"] = "always";
-    [Given("no harness is chosen")]
-    public void DefaultHarness() => harness = "";
+    string Line => Path.Combine(repo, "factory/assembly-line/line.dot");
+    string Machine(string name) => Path.Combine(repo, "factory/machines", name + ".json");
+    [Given("no harness is chosen for the validator")]
+    public void DefaultHarness() => File.WriteAllText(Machine("validator"), "{}");
+    [Given("the validator has been taken out, so the doer goes straight to the planner")]
+    public void NoValidator()
+    {
+        var line = File.ReadAllText(Line).Replace("doer -> validator", "doer -> planner");
+        File.WriteAllText(Line, System.Text.RegularExpressions.Regex.Replace(line, @"(?m)^\s*validator\s*->[^\r\n]*", ""));
+    }
+    [Given("\"validator\" is misspelt \"validater\" throughout the assembly line")]
+    public void Misspelled() => File.WriteAllText(Line, File.ReadAllText(Line).Replace("validator", "validater"));
+    [Given("the edge from validator to planner has been taken out")]
+    public void NoFinishRoute() => File.WriteAllText(Line, System.Text.RegularExpressions.Regex.Replace(File.ReadAllText(Line), @"(?m)^\s*validator\s*->\s*planner[^\r\n]*", ""));
+    [Given("the edges from validator are labelled \"approved\" and \"not approved\"")]
+    public void ApprovedEdges() => File.WriteAllText(Line, File.ReadAllText(Line).Replace("not satisfied", "not approved").Replace("satisfied", "approved"));
+    [When("the factory reads the assembly line")]
+    public void ReadLine() => Invoke(false, true);
+    [Then("it accepts it")]
+    public void AcceptLine() => Assert.That(exitCode, Is.Zero, output);
+    [Then("it refuses it")]
+    public void RefuseLine() => Assert.That(exitCode, Is.Not.Zero, output);
+    [Then("it reports that it has no machine called {string}")]
+    public void MissingMachine(string name) => Assert.That(output, Does.Contain("no machine called \"" + name + "\""));
+    [Then("it reports that finish cannot be reached from validator")]
+    public void Unreachable() => Assert.That(output, Does.Contain("finish cannot be reached from validator"));
+    [Then("it reports that the result of validator has no field {string}")]
+    public void MissingField(string field) => Assert.That(output, Does.Contain("result of validator has no field \"" + field + "\""));
+    [Then("the validator has not been called")]
+    public void NoValidatorCalls() => Assert.That(MachineCalls("validator"), Is.Empty);
+    [Then("it reports that a task hit its limit")]
+    public void TaskLimit() { Assert.That(exitCode, Is.Not.Zero); Assert.That(output, Does.Contain("task hit its limit")); }
+    [Given("the factory allows at most three attempts at a task")]
+    public void ThreeTaskAttempts() => attempts = 3;
+    [Then("the doer has been called four times")]
+    public void FourCalls() => Assert.That(MachineCalls("doer"), Has.Length.EqualTo(4));
     [When("the factory runs one pass")]
     public void OnePass() => Invoke(false);
-    void Invoke(bool all)
+    void Invoke(bool all, bool checkLine = false)
     {
         beforeHead = Git("rev-parse", "HEAD");
         File.WriteAllText(Path.Combine(workspace, "behavior.json"), JsonSerializer.Serialize(behavior));
         var args = new List<string> { Path.Combine(repo, "factory/Factory.dll") };
         if (seed != "") args.AddRange(["--seed", Path.GetRelativePath(repo, seed)]);
         if (target != "") args.AddRange(["--target", absoluteTarget ? target : Path.GetRelativePath(repo, target)]);
-        if (harness != "")
-            foreach (var role in new[] { "planner", "doer", "validator" })
-                args.AddRange(["--" + role, Path.Combine(harness, missingDoer && role == "doer" ? "missing" : role)]);
-        if (all) args.Add("--all");
+        if (checkLine) args.Add("--check-line");
         if (attempts != null) args.AddRange(["--attempts", attempts.Value.ToString()]);
         if (lens != null) args.AddRange(["--lens", lens]);
         var dotnet = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".dotnet/dotnet");
@@ -105,8 +145,7 @@ public sealed class FactorySteps
     [Then("pi has not been called")]
     public void PiNotCalled() => Assert.That(Calls.Any(line => JsonDocument.Parse(line).RootElement.GetProperty("agent").GetString() == "pi"), Is.False);
     [Given("the doer cannot be run")]
-    public void MissingAgent() => missingDoer = true;
-    bool missingDoer;
+    public void MissingAgent() => File.WriteAllText(Machine("doer"), JsonSerializer.Serialize(new { harness = Path.Combine(harness, "missing") }));
     [Given("no plan")]
     public void NoPlan() { if (File.Exists(Plan)) File.Delete(Plan); }
     [Then("there is no plan")]
@@ -166,6 +205,13 @@ public sealed class FactorySteps
             Assert.That(data.GetProperty("cwd").GetString(), Is.EqualTo(target));
         }
     }
+    [Then("the planner was called before the doer")]
+    public void PlannerBeforeDoer()
+    {
+        Assert.That(Calls, Is.Not.Empty);
+        Assert.That(JsonDocument.Parse(Calls[0]).RootElement.GetProperty("role").GetString(), Is.EqualTo("planner"));
+        Assert.That(MachineCalls("doer"), Is.Not.Empty);
+    }
     [Then("the planner was asked for a result with the field {string}")]
     public void ResultRequested(string field)
     {
@@ -175,6 +221,8 @@ public sealed class FactorySteps
     }
     [Given("the validator says {string} before its result")]
     public void Talk(string text) => behavior["talk"] = text;
+    [When("the factory runs")]
+    public void FactoryRuns() => Invoke(true);
     [When("the factory runs to completion")]
     public void ToCompletion() => Invoke(true);
     [Then("the doer has been called once")]
@@ -197,6 +245,12 @@ public sealed class FactorySteps
     public void SecondWork() => Assert.That(Git("show", WorkCommits.Single() + ":" + Path.GetRelativePath(repo, Path.Combine(target, "beta.txt"))), Is.EqualTo("work for beta"));
     [Then("the plan shows every task as done")]
     public void EveryTaskDone() { Assert.That(Tasks(), Is.Not.Empty); Assert.That(File.ReadAllText(Plan), Does.Not.Contain("- [ ]")); }
+    [Then("there are two new work commits")]
+    public void TwoWorkCommits() => Assert.That(WorkCommits, Has.Length.EqualTo(2));
+    [Then("no new commit contains the work for the first task")]
+    public void NoFirstWork() => Assert.That(WorkCommits.SelectMany(ProductFiles), Has.None.Contains("alpha.txt"));
+    [Then("each new work commit contains the work for one task")]
+    public void OneTaskPerCommit() => Assert.That(WorkCommits.Select(ProductFiles), Has.All.Length.EqualTo(1));
     [Then("there are three new work commits")]
     public void ThreeCommits() => Assert.That(WorkCommits, Has.Length.EqualTo(3));
     [Given("the validator answers in prose, with no result")]
@@ -353,7 +407,7 @@ public sealed class FactorySteps
     [Then("the doer was given the validator's findings")]
     public void FindingsGiven()
     {
-        Assert.That(MachineCalls("doer"), Has.Length.EqualTo(2));
+        Assert.That(MachineCalls("doer"), Has.Length.GreaterThanOrEqualTo(2));
         Assert.That(Prompt(MachineCalls("doer")[1]), Does.Contain((string)behavior["finding"]));
     }
     [AfterScenario]

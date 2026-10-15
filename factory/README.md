@@ -1,57 +1,22 @@
 # C# factory
 
-Requires .NET 10 and Git. Each machine runs `pi` by default.
-Run from the repository root:
+Requires .NET 10, Git, and `pi` for real builds. Run from the repository root:
 
 ```sh
-bin/factory --seed tetris/spec.md --target tetris/tetris-002
-bin/factory --seed tetris/spec.md --target tetris/tetris-002 --all
-npm --prefix tetris/tetris-002 start
+bin/factory --seed tetris/spec.md --target tetris/tetris-003
+npm --prefix tetris/tetris-003 start
 ```
 
-With no plan, the first pass asks the planner to create one and commits it.
-Otherwise, the planner checks for remaining work, the doer implements the
-next task, and the validator reviews that task's product changes. Findings
-go back to the doer, which records and resolves them as subtasks. Accepted
-work is committed before the planner marks its task done. The updated plan
-is committed too. `--all` repeats until the planner returns `complete: true`.
-The factory never reads the plan, and commits only the selected target.
+The factory reads `src/assembly-line/line.dot` (copied beside the built CLI) before it does any work. Its Graphviz edges route machine results: `complete` goes to finish, `not complete` goes to the doer, and the validator's `satisfied` result decides whether to retry or return to the planner. Change the line to route the doer directly to the planner to run without validation. `bin/factory --check-line` checks the graph and configured machines without calling an agent.
 
-Our chosen validator lens is **testability**: can game logic be tested
-independently of terminal I/O, time, randomness, and other external effects?
-This is the default. Change it for a run with `--lens "usability"` or another
-focus. The validator reports findings; it is instructed not to edit files.
-Its judgment is still an agent's judgment, not a guarantee of correctness.
+Each machine has a JSON configuration in `src/machines/`, named after the machine. Its `harness` field selects an executable, with `pi` as the default. The validator's `lens` field selects what it checks; the default is **testability**, meaning game logic should be testable independently of terminal I/O, time, randomness, and other external effects. The `--lens` option can override it for a run. Harnesses accept Pi-style arguments `--print --no-session -- <prompt>`; use a wrapper for other CLI interfaces. Each machine's last JSON line is its result. The factory asks for the fields named by its outgoing edges, and asks the validator for `findings` as well.
 
-`--attempts 3` limits do/validate attempts per task (three is the default).
-If validation never passes, the factory exits unsuccessfully and leaves the
-work and findings uncommitted, with the main task unfinished. Invalid machine
-results also stop the run without committing that attempt's work.
+A fresh target starts with a new `.factory/plan.md`. Running again resumes that target's plan. The factory commits each accepted task and the final plan, while preserving unrelated staged and unstaged changes. `--attempts 3` limits work and validation attempts for a task (three is the default). Failed validation leaves the attempted work uncommitted.
 
-Choose a harness for all roles with `--agent <name-or-path>`, or override
-individual roles with `--planner`, `--doer`, and `--validator`. Each accepts
-Pi-style arguments `--print --no-session -- <prompt>`; use a wrapper for other
-CLI interfaces. The last JSON line is the result: the planner returns boolean
-`complete`, the validator returns boolean `satisfied` and array `findings`,
-and the doer returns an object describing its work. Each call is stateless.
-
-Run the acceptance tests from this folder:
+Run the acceptance suite from this folder:
 
 ```sh
 $HOME/.dotnet/dotnet test
 ```
 
-Use `dotnet` directly if it is on PATH. Tests also require Python 3 for the
-small machine double in `Steps/Doubles/agent.py`. Each example copies the
-built factory into a temporary Git repository and cleans it up afterward.
-The doubles record arguments and working directories, and keep their state
-outside the factory. The planner double checks that work was committed before
-marking it done. Tests cover retries, findings, malformed results, isolated
-targets, and preservation of unrelated staged and unstaged changes.
-
-The default suite excludes `@real-agent` examples. These remain manual
-exercises; their real-game assertions are not bound to automated steps.
-Once Pi is authenticated, use the commands above, inspect the recorded
-findings in `tetris/tetris-002/.factory/plan.md`, and compare the game with
-`tetris/tetris-001`. Keep the first generation for comparison. Use a new
-target when trying a different seed or validation lens.
+Use `dotnet` directly if it is on PATH. Tests require Python 3 for the small machine double in `Steps/Doubles/agent.py`. The default suite excludes `@real-agent` examples; run those explicitly with `dotnet test --settings real-agent.runsettings` after authenticating Pi. Inspect the recorded findings in `tetris/tetris-003/.factory/plan.md` and compare the game with earlier generations. Use a fresh target when trying a different seed or lens.
