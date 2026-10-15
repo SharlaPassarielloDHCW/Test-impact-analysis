@@ -103,7 +103,9 @@ ul { line-height: 1.6; }
       const links = item.links.map(link => `Calls ${link.function.module}#${link.function.name}; impact path: ${link.callPath.map(fn => `${fn.module}#${fn.name}`).join(' → ')}`);
       const explanations = [...links, ...item.reasons];
       html += `<tr><td class="decision ${item.status}">${escapeHtml(decision)}</td>`;
-      html += `<td>${escapeHtml(item.name)}<br><code>${escapeHtml(`${item.file}:${item.line}`)}</code></td>`;
+      html += `<td>${escapeHtml(item.id ? `${item.id} — ${item.name}` : item.name)}`;
+      if (item.description) html += `<br>${escapeHtml(item.description)}`;
+      html += `<br><code>${escapeHtml(`${item.file}:${item.line}`)}</code></td>`;
       html += `<td><ul>${explanations.map(reason => `<li>${escapeHtml(reason)}</li>`).join('')}</ul></td></tr>`;
     }
     html += '</tbody></table>';
@@ -146,7 +148,7 @@ export function parseCliArgs(argv) {
   return {
     baseCommit: values.base,
     headCommit: values.head,
-    sourcePath: values.source ?? 'tetris/tetris-002',
+    sourcePath: values.source ?? 'impact-demo',
     reportPath: values.report,
   };
 }
@@ -217,7 +219,7 @@ export function isProductionJsFile(filePath) {
   const parts = filePath.split(/[/\\]/);
   if (parts.some(p => ['node_modules', 'dist', 'build', 'coverage', 'generated'].includes(p))) return false;
   if (parts.some(p => p.includes('.test.') || p.includes('.spec.'))) return false;
-  if (parts.some(p => p === 'tests' || p === 'test' || p === '__tests__' || p === '__mocks__')) return false;
+  if (parts.some(p => p === 'tests' || p === 'test' || p === 'functional-tests' || p === '__tests__' || p === '__mocks__')) return false;
   if (parts.some(p => p.endsWith('.min.js') || p.endsWith('.bundle.js') || p.endsWith('.d.ts'))) return false;
   return true;
 }
@@ -293,7 +295,7 @@ export async function runWorkflow({
   validateCommit(gitRoot, baseCommit, execGit);
   validateCommit(gitRoot, headCommit, execGit);
 
-  sourcePath ??= 'tetris/tetris-002';
+  sourcePath ??= 'impact-demo';
   const resolvedSource = isAbsolute(sourcePath)
     ? sourcePath
     : resolve(gitRoot, sourcePath);
@@ -354,8 +356,30 @@ export async function runWorkflow({
     uncertainAreas: uniqueUncertainty,
   };
 
-  const discovered = discoverTestCases(files.split('\0').filter(Boolean), file => getFileContentAtCommit(gitRoot, headCommit, file, execGit));
-  Object.assign(impactMap, selectTests(discovered, impactMap, exportsByModule));
+  const trackedFiles = files.split('\0').filter(Boolean);
+  const discovered = discoverTestCases(trackedFiles, file => getFileContentAtCommit(gitRoot, headCommit, file, execGit));
+  const selection = selectTests(discovered, impactMap, exportsByModule);
+  const metadataFile = join(sourceRelative, 'functional-tests', 'test-cases.json');
+  if (trackedFiles.includes(metadataFile)) {
+    try {
+      const catalog = JSON.parse(getFileContentAtCommit(gitRoot, headCommit, metadataFile, execGit));
+      if (!Array.isArray(catalog)) throw new Error('expected an array');
+      const metadata = new Map();
+      for (const item of catalog) {
+        if (typeof item.file !== 'string' || typeof item.title !== 'string' ||
+            typeof item.id !== 'string' || typeof item.description !== 'string')
+          throw new Error('each case needs file, title, ID, and description');
+        metadata.set(`${join(sourceRelative, 'functional-tests', item.file)}:${item.title}`, item);
+      }
+      selection.testCases = selection.testCases.map(item => {
+        const details = metadata.get(`${item.file}:${item.name}`);
+        return details ? { ...item, id: details.id, description: details.description } : item;
+      });
+    } catch (error) {
+      selection.testDiscoveryIssues.push({ file: metadataFile, reason: `case metadata could not be read: ${error.message}` });
+    }
+  }
+  Object.assign(impactMap, selection);
 
   const htmlContent = generateHtmlReport(impactMap);
   const jsonContent = generateJsonReport(impactMap);

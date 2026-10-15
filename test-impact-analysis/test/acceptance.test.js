@@ -184,6 +184,24 @@ export function unrelated() { return 4; }` });
   assert.deepEqual(await f.report(head), map);
 });
 
+test('Task Desk style case metadata appears in HTML and JSON reports', async t => {
+  const f = fixture(t, {
+    'src/core.js': 'export function saveTask() { return 1; }',
+    'src/functional-tests/core.test.js': "import test from 'node:test'; import { saveTask } from '../core.js'; test('saving a task', () => saveTask());",
+    'src/functional-tests/test-cases.json': JSON.stringify([{
+      id: 'SAVE-01', file: 'core.test.js', title: 'saving a task', description: 'Saving adds a task to the list.',
+    }]),
+  });
+  f.write({ 'src/core.js': 'export function saveTask() { return 2; }' });
+  const report = await f.report(f.commit());
+  assert.equal(report.testCases.length, 1);
+  assert.equal(report.testCases[0].status, 'linked');
+  assert.equal(report.testCases[0].id, 'SAVE-01');
+  assert.equal(report.testCases[0].description, 'Saving adds a task to the list.');
+  assert.match(readFileSync(join(f.root, 'report.html'), 'utf8'), /SAVE-01 — saving a task/);
+  assert.match(readFileSync(join(f.root, 'report.html'), 'utf8'), /Saving adds a task to the list/);
+});
+
 test('irrelevant changes exclude discovered cases without running them', async t => {
   const f = fixture(t, {
     'src/core.js': 'export function value() { return 1; }',

@@ -31,7 +31,7 @@ describe('parseCliArgs', () => {
     const result = parseCliArgs(['--base', 'abc123', '--head', 'def456']);
     assert.strictEqual(result.baseCommit, 'abc123');
     assert.strictEqual(result.headCommit, 'def456');
-    assert.strictEqual(result.sourcePath, 'tetris/tetris-002');
+    assert.strictEqual(result.sourcePath, 'impact-demo');
     assert.strictEqual(result.reportPath, undefined);
   });
 
@@ -512,7 +512,7 @@ describe('main', () => {
 
 describe('isProductionJsFile', () => {
   it('accepts regular .js files', () => {
-    assert.strictEqual(isProductionJsFile('src/game.js'), true);
+    assert.strictEqual(isProductionJsFile('impact-demo/site/src/tasks.js'), true);
     assert.strictEqual(isProductionJsFile('lib/helpers.js'), true);
   });
 
@@ -527,9 +527,10 @@ describe('isProductionJsFile', () => {
   });
 
   it('rejects test files', () => {
-    assert.strictEqual(isProductionJsFile('src/game.test.js'), false);
-    assert.strictEqual(isProductionJsFile('src/game.spec.js'), false);
+    assert.strictEqual(isProductionJsFile('src/app.test.js'), false);
+    assert.strictEqual(isProductionJsFile('src/app.spec.js'), false);
     assert.strictEqual(isProductionJsFile('tests/regression.test.js'), false);
+    assert.strictEqual(isProductionJsFile('impact-demo/functional-tests/helpers.js'), false);
     assert.strictEqual(isProductionJsFile('__tests__/unit.js'), false);
   });
 
@@ -584,23 +585,23 @@ describe('parseFunctionRanges', () => {
     assert.strictEqual(result[0].endLine, 4);
   });
 
-  it('parses real Tetris game.js', () => {
-    const code = readFileSync(new URL('../../tetris/tetris-002/game.js', import.meta.url), 'utf-8');
+  it('parses real Task Desk task functions', () => {
+    const code = readFileSync(new URL('../../impact-demo/site/src/tasks.js', import.meta.url), 'utf-8');
     const result = parseFunctionRanges(code);
     const names = result.map(r => r.name);
-    assert.ok(names.includes('createEmptyBoard'));
-    assert.ok(names.includes('createGameState'));
-    assert.ok(names.includes('collides'));
-    assert.ok(names.includes('tick'));
-    assert.ok(names.includes('movePiece'));
-    assert.ok(names.includes('clearLines'));
+    assert.ok(names.includes('createTask'));
+    assert.ok(names.includes('addTask'));
+    assert.ok(names.includes('filterTasks'));
+    assert.ok(names.includes('sortTasks'));
+    assert.ok(names.includes('taskStats'));
+    assert.ok(names.includes('parseTasks'));
   });
 
-  it('parses real Tetris pieces.js with large nested objects', () => {
-    const code = readFileSync(new URL('../../tetris/tetris-002/pieces.js', import.meta.url), 'utf-8');
+  it('parses real Task Desk app with nested event handlers', () => {
+    const code = readFileSync(new URL('../../impact-demo/site/src/app.js', import.meta.url), 'utf-8');
     const result = parseFunctionRanges(code);
     const names = result.map(r => r.name);
-    assert.deepStrictEqual(names, ['getShape', 'getColor', 'createPiece', 'getWallKicks']);
+    assert.deepStrictEqual(names, ['mountApp', 'render']);
   });
 });
 

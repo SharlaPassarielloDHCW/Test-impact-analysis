@@ -1,4 +1,4 @@
-# Test impact analysis — iteration 002
+# Test impact analysis — Task Desk target
 
 Maps changed JavaScript functions to their direct and transitive production
 callers, then recommends individual `node:test` cases that call those functions.
@@ -16,15 +16,24 @@ From this repository root or `test-impact-analysis/`:
 ```sh
 node test-impact-analysis/bin/test-impact-analysis.js \
   --base <base-commit> --head <head-commit> \
-  --source tetris/tetris-002 \
   --report test-impact-analysis/reports/test-selection.html
 ```
 
 When starting inside `test-impact-analysis/`, use `node bin/test-impact-analysis.js`.
 Source and report paths are relative to the containing Git repository root.
-The source defaults to `tetris/tetris-002`. The HTML and matching `.json` report
+The source defaults to `impact-demo`, the Task Desk website and its 50 functional
+tests. Use `--source <path>` to analyze a different target. The HTML and matching `.json` report
 are written outside the source subtree. Files are read from Git commits;
 uncommitted source edits are ignored. The analyzer never runs the target's tests.
+Choose base and head commits that bracket a change under `impact-demo/site/src/`.
+The initial Task Desk baseline is `b7f4679`; comparing it with a commit that
+only changes test metadata will show all 50 tests but no production impact.
+To reproduce the current local reports, use `--base 402dbc4 --head HEAD`:
+that comparison includes the first addition of the website code. For later,
+focused changes, compare the commit before the website edit with the commit
+containing it. Reports in `reports/` are generated locally and ignored by Git.
+The `iterations/` goal files retain the earlier Tetris exercise as history;
+they do not set the CLI's current target.
 
 ## Reading the report
 
@@ -37,7 +46,8 @@ uncommitted source edits are ignored. The analyzer never runs the target's tests
 - No production changes produces an explicit empty result, even if ignored
   files changed. Both outputs use deterministic ordering.
 - `testCases` lists each discovered `.test.js` or `.spec.js` case at the head
-  commit. `linked` cases have a direct call to a changed or impacted function;
+  commit. For Task Desk, each case also carries its stable ID and description
+  from `impact-demo/functional-tests/test-cases.json`. `linked` cases have a direct call to a changed or impacted function;
   their `links` contain the production call path. `uncertain` cases have an
   unresolved test call or a relevant code uncertainty. Both are recommended.
   `excluded` cases show why no link was found. `recommended` is a Boolean for
@@ -61,7 +71,7 @@ Tests that reach production through nested helpers, callbacks, or dynamic
 imports may need manual review. The report is a recommendation, not a record of
 executed tests.
 
-Test directories, `node_modules`, build/dist/coverage/generated directories,
+Test directories (including `functional-tests`), `node_modules`, build/dist/coverage/generated directories,
 `.test.js`, `.spec.js`, `.min.js`, and `.bundle.js` files are ignored. Other
 repository-specific generated files may need additional exclusion rules.
 
