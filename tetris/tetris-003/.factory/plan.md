@@ -2,7 +2,7 @@
 
 Tasks:
 1. **[done]** Scaffold project with package.json and a start script (`npm start`).
-2. **[unfinished]** Render the game board, borders, score, controls, and game-over messages within 24 terminal rows.
+2. **[done]** Render the game board, borders, score, controls, and game-over messages within 24 terminal rows.
    - Review notes (all identified, none yet implemented):
      - rotate(piece) should be a pure, deterministic function testable without I/O, time, or randomness.
      - isValidPosition, buildDisplay, lockPiece, clearLines, and updateScore should contain only game logic and not invoke blessed, timers, or randomness.
