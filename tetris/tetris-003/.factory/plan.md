@@ -10,5 +10,5 @@ Tasks:
      - tick interleaves board logic with render() (terminal I/O) and spawnPiece() (randomness).
      - hardDrop mixes deterministic drop logic with spawnPiece(), coupling it to randomness.
      - All functions mutate module-level globals and none are exported, preventing external unit-test access and encouraging test interdependence.
-3. **[unfinished]** Implement the game loop, piece spawning, movement, rotation, and hard drop with terminal input handling.
+3. **[done]** Implement the game loop, piece spawning, movement, rotation, and hard drop with terminal input handling.
 4. **[unfinished]** Implement line clearing, scoring, and game-over detection.

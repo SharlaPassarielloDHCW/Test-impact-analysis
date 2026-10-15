@@ -10,6 +10,9 @@ const {
   tick,
   spawnPiece,
   lockPiece,
+  clearLines,
+  updateScore,
+  settlePiece,
 } = require('../index.js');
 
 function emptyBoard() {
@@ -115,4 +118,47 @@ test('right movement is blocked by wall', () => {
   const board = emptyBoard();
   assert.strictEqual(isValidPosition(board, PIECES.O, BOARD_WIDTH - 2, 0), true);
   assert.strictEqual(isValidPosition(board, PIECES.O, BOARD_WIDTH - 1, 0), false);
+});
+
+test('clearLines removes full rows and shifts rows down', () => {
+  const board = emptyBoard();
+  board[18].fill(1);
+  board[19].fill(1);
+  const result = clearLines(board);
+  assert.strictEqual(result.linesCleared, 2);
+  assert.strictEqual(result.board[19].every(cell => cell === 0), true);
+  assert.strictEqual(result.board[18].every(cell => cell === 0), true);
+});
+
+test('clearLines returns 0 when no rows are full', () => {
+  const board = emptyBoard();
+  board[5][3] = 1;
+  const result = clearLines(board);
+  assert.strictEqual(result.linesCleared, 0);
+  assert.deepStrictEqual(result.board[5], board[5]);
+});
+
+test('updateScore awards correct points', () => {
+  assert.strictEqual(updateScore(0, 0), 0);
+  assert.strictEqual(updateScore(0, 1), 100);
+  assert.strictEqual(updateScore(100, 2), 400);
+  assert.strictEqual(updateScore(0, 3), 500);
+  assert.strictEqual(updateScore(0, 4), 800);
+});
+
+test('settlePiece clears lines and spawns next piece', () => {
+  const board = emptyBoard();
+  board[19].fill(1);
+  const result = settlePiece(board, 50, () => 0);
+  assert.strictEqual(result.score, 150);
+  assert.strictEqual(result.board[19].every(cell => cell === 0), true);
+  assert.strictEqual(result.piece, PIECES.I);
+  assert.strictEqual(result.gameOver, false);
+});
+
+test('settlePiece detects game over when spawn is blocked', () => {
+  const board = emptyBoard();
+  board[0][3] = 1;
+  const result = settlePiece(board, 0, () => 0);
+  assert.strictEqual(result.gameOver, true);
 });
