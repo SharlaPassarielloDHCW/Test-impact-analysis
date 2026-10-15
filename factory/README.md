@@ -8,9 +8,13 @@ bin/factory --run tetris --target tetris/tetris-003 --line careful --seed tetris
 
 Resume it with `bin/factory --run tetris`. The first invocation saves its settings in `factory/runs/tetris/run.json` and its plan in `factory/runs/tetris/plan.md`. Run state is ignored by Git. The existing Tetris run has already been migrated and its plan is complete; use a new run name and target to build again.
 
-The target owns its Graphviz lines in `.assembly-lines/`, such as `careful.dot` and `quick.dot`, and machine configurations in `.assembly-lines/.machines/<name>/config.json`. `quick` routes the doer straight to the planner; `careful` uses the validator. `bin/factory --run tetris --check-line` checks the selected line and machines without calling an agent.
+The target owns its Graphviz lines in `.assembly-lines/`, such as `careful.dot`, `quick.dot` and `three-brains.dot`, and machine configurations in `.assembly-lines/.machines/<name>/config.json`. `quick` routes the doer straight to the planner; `careful` uses the validator. `three-brains` starts three reviewers together, then passes their JSON results to a synthesiser. A reviewer failure stops the run before synthesis or commit. Check the line without calling an agent:
 
-Each machine configuration can select a `harness` (default `pi`). The validator's `lens` defaults to testability, and `--lens` can override it for an invocation. Harnesses accept Pi-style arguments `--print --no-session -- <prompt>` and end with a JSON result. The factory commits each accepted task's product work in the target, excluding `.assembly-lines/`; validation failures leave attempted work uncommitted. `--attempts 3` limits attempts per task.
+```sh
+bin/factory --run tetris-brains --target tetris/tetris-003 --line three-brains --seed tetris/spec.md --check-line
+```
+
+Each machine configuration can select a `harness` (default `pi`), an optional Pi `model`, and a `prompt` for branch work. The sample reviewers use Anthropic, Google and OpenAI models through OpenRouter; choose models available to your Pi installation and authenticate their provider before a real run. A reviewer's `lens` defaults to testability, and `--lens` can override it for an invocation. Harnesses accept Pi-style arguments `--print --no-session [--model <model>] -- <prompt>` and end with a JSON result. The factory commits each accepted task's product work in the target, excluding `.assembly-lines/`; review failures leave attempted work uncommitted. `--attempts 3` limits attempts per task.
 
 Run the acceptance suite from `factory/`:
 

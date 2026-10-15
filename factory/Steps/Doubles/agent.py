@@ -6,6 +6,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import time
 
 workspace = pathlib.Path(os.environ['FACTORY_TEST_WORKSPACE'])
 behavior = json.loads((workspace / 'behavior.json').read_text())
@@ -61,6 +62,24 @@ elif role == 'validator':
     if behavior.get('talk'):
         print('{"satisfied": false, "findings": ["outdated verdict"]}')
         print(behavior['talk'])
+elif role.startswith('reviewer_'):
+    if behavior.get('reviewers_wait'):
+        (workspace / f'{role}.started').write_text('started')
+        deadline = time.monotonic() + 10
+        while len(list(workspace.glob('reviewer_*.started'))) < 3:
+            if time.monotonic() > deadline:
+                sys.exit(2)
+            time.sleep(.01)
+    if behavior.get('reviewer_prose') == role:
+        print('My review is in prose.')
+        sys.exit(0)
+    findings = behavior.get('reviewer_findings', {}).get(role, [])
+    result = {'satisfied': not findings, 'findings': findings}
+elif role == 'synthesiser':
+    previous = sum(c['role'] == 'synthesiser' and c['cwd'] == os.getcwd() for c in calls)
+    mode = behavior.get('synthesis', 'always')
+    satisfied = mode == 'always' or (mode == 'retry' and previous > 0)
+    result = {'satisfied': satisfied, 'findings': [] if satisfied else [behavior.get('synth_finding', 'Fix review findings')]}
 else:
     print('No machine role selected')
     sys.exit(1)

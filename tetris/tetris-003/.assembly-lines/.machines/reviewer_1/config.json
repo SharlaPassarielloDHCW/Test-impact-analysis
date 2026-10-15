@@ -1,0 +1,1 @@
+{"harness":"pi","model":"openrouter/anthropic/claude-sonnet-4.5","lens":"testability","prompt":"Review the current task's work. Report findings only; change neither plan nor product files."}

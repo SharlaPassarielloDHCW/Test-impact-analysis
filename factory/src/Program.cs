@@ -4,16 +4,20 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 
 string? Option(string name) { var i = Array.IndexOf(args, name); return i >= 0 && i + 1 < args.Length ? args[i + 1] : null; }
-async Task<(int Code, string Output)> Run(string directory, string command, params string[] arguments)
+async Task<(int Code, string Output)> RunProcess(string directory, string command, string[] arguments, CancellationToken cancellation = default)
 {
     var start = new ProcessStartInfo(command) { WorkingDirectory = directory, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
     foreach (var argument in arguments) start.ArgumentList.Add(argument);
     using var process = Process.Start(start)!;
     var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
-    await process.WaitForExitAsync(); var error = await stderr;
+    try { await process.WaitForExitAsync(cancellation); }
+    catch (OperationCanceledException) { if (!process.HasExited) process.Kill(true); throw; }
+    var error = await stderr;
     if (process.ExitCode != 0) Console.Error.Write(error);
     return (process.ExitCode, await stdout);
 }
+async Task<(int Code, string Output)> Run(string directory, string command, params string[] arguments) =>
+    await RunProcess(directory, command, arguments, CancellationToken.None);
 var factory = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
 while (Path.GetFileName(factory) != "factory") factory = Directory.GetParent(factory)!.FullName;
 var runName = Option("--run");
@@ -53,7 +57,8 @@ if (!int.TryParse(Option("--attempts") ?? "3", out var attempts) || attempts < 1
 { Console.Error.WriteLine("--attempts must be a positive integer"); return 1; }
 var linePath = Path.Combine(target, ".assembly-lines", lineName + ".dot");
 var edges = new List<Edge>();
-var machines = new Dictionary<string, (string Harness, string Lens)>();
+var machines = new Dictionary<string, (string Harness, string Lens, string? Model, string? Prompt)>();
+var fanOuts = new Dictionary<string, (string[] Branches, string Join)>();
 try
 {
     var line = File.ReadAllText(linePath);
@@ -66,7 +71,9 @@ try
         using var document = JsonDocument.Parse(File.ReadAllText(file));
         var root = document.RootElement;
         machines[node] = (root.TryGetProperty("harness", out var h) ? h.GetString() ?? "pi" : "pi",
-            root.TryGetProperty("lens", out var l) ? l.GetString() ?? "testability" : "testability");
+            root.TryGetProperty("lens", out var l) ? l.GetString() ?? "testability" : "testability",
+            root.TryGetProperty("model", out var m) ? m.GetString() : null,
+            root.TryGetProperty("prompt", out var p) ? p.GetString() : null);
     }
     foreach (var node in machines.Keys.Reverse())
     {
@@ -76,10 +83,20 @@ try
     }
     if (!edges.Any(e => e.From == "start") || edges.Any(e => e.To == "finish" && e.From != "planner"))
         throw new InvalidOperationException("invalid assembly line");
+    foreach (var group in edges.GroupBy(e => e.From).Where(g => g.Count() > 1 && g.All(e => e.Label == null)))
+    {
+        var branches = group.Select(e => e.To).ToArray();
+        var exits = branches.Select(branch => edges.Where(e => e.From == branch).ToArray()).ToArray();
+        if (branches.Distinct().Count() != branches.Length || exits.Any(e => e.Length != 1 || e[0].Label != null) ||
+            exits.Select(e => e[0].To).Distinct().Count() != 1)
+            throw new InvalidOperationException($"the branches from {group.Key} do not meet");
+        fanOuts[group.Key] = (branches, exits[0][0].To);
+    }
 }
 catch (Exception error) when (error is IOException or JsonException or InvalidOperationException)
 { Console.Error.WriteLine(error.Message); return 1; }
 if (args.Contains("--check-line")) { Console.WriteLine("assembly line accepted"); return 0; }
+var joinMachines = fanOuts.Values.Select(fanOut => fanOut.Join).ToHashSet();
 Directory.CreateDirectory(runFolder);
 if (!File.Exists(settingsFile)) File.WriteAllText(settingsFile, JsonSerializer.Serialize(new { seed, target, line = lineName }));
 Directory.CreateDirectory(target);
@@ -110,12 +127,15 @@ async Task<string> WorkChanges()
     { var diff = await Run(rootPath, "git", "diff", "--no-index", "--", "/dev/null", file); if (diff.Code > 1) throw new InvalidOperationException("could not collect task changes"); changes += diff.Output; }
     return changes;
 }
-async Task<JsonElement> Call(string role, string prompt)
+async Task<JsonElement> Call(string role, string prompt, CancellationToken cancellation = default)
 {
     var harness = machines[role].Harness;
     if (harness.Contains(Path.DirectorySeparatorChar)) harness = Path.GetFullPath(harness);
     (int Code, string Output) answer;
-    try { answer = await Run(target, harness, "--print", "--no-session", "--", $"Role: {role}\n{prompt}"); }
+    var arguments = new List<string> { "--print", "--no-session" };
+    if (machines[role].Model is { } model) { arguments.Add("--model"); arguments.Add(model); }
+    arguments.AddRange(["--", $"Role: {role}\n{prompt}"]);
+    try { answer = await RunProcess(target, harness, arguments.ToArray(), cancellation); }
     catch (Win32Exception) { throw new InvalidOperationException($"could not run the {role}"); }
     if (answer.Code != 0) throw new InvalidOperationException($"could not run the {role} successfully");
     foreach (var line in answer.Output.Split('\n').Reverse())
@@ -143,6 +163,7 @@ try
 {
     var current = edges.Single(e => e.From == "start").To;
     var findings = "[]"; var attempt = 0; var awaitingCommit = false; var hadPlan = File.Exists(plan);
+    string? joinedResults = null;
     while (current != "finish")
     {
         var fields = Fields(current);
@@ -167,7 +188,8 @@ try
         {
             attempt++;
             result = await Call(current, $"{context}\nImplement only the first unfinished task. Do not mark that task done; the planner will do that after the work is committed.\nValidator findings from the last attempt: {findings}\nRecord each finding as a subtask of the current task, fix it, and mark the subtask done when resolved. Findings must not become new top-level tasks. End with one line of JSON describing the task you worked on. {request}");
-            if (!machines.ContainsKey("validator")) { await Commit(); awaitingCommit = true; }
+            var doerEdges = edges.Where(e => e.From == "doer").ToArray();
+            if (doerEdges.Length == 1 && doerEdges[0].To == "planner") { await Commit(); awaitingCommit = true; }
         }
         else if (current == "validator")
         {
@@ -178,12 +200,35 @@ try
             if (!result.TryGetProperty("findings", out var reported) || reported.ValueKind != JsonValueKind.Array) throw new InvalidOperationException("could not read the validator's result");
             findings = reported.GetRawText();
         }
+        else if (joinedResults != null)
+        {
+            result = await Call(current, $"The only input is the results from the branches: {joinedResults}\nDecide whether the current task is satisfied. {request} Include array \"findings\".");
+            if (result.TryGetProperty("findings", out var reported) && reported.ValueKind == JsonValueKind.Array)
+                findings = reported.GetRawText();
+            joinedResults = null;
+        }
         else result = await Call(current, $"{context}\n{request}");
         Console.WriteLine($"{current}: {result.GetRawText()}");
+        if (fanOuts.TryGetValue(current, out var fanOut))
+        {
+            using var cancellation = new CancellationTokenSource();
+            var changes = await WorkChanges();
+            var calls = fanOut.Branches.Select(async branch =>
+            {
+                var job = machines[branch].Prompt ?? "Act on the current task's product changes and report your result. Do not commit.";
+                var branchPrompt = $"{context}\n{job} Use this lens: {Option("--lens") ?? machines[branch].Lens}. End with one line of JSON containing your result and findings.\nCurrent task changes:\n{changes}";
+                try { return (branch, result: await Call(branch, branchPrompt, cancellation.Token)); }
+                catch { cancellation.Cancel(); throw; }
+            }).ToArray();
+            var reports = await Task.WhenAll(calls);
+            joinedResults = JsonSerializer.Serialize(reports.ToDictionary(report => report.branch, report => report.result));
+            current = fanOut.Join;
+            continue;
+        }
         var next = Route(current, result).To;
-        if (current == "validator" && next == "doer" && attempt >= attempts)
+        if ((current == "validator" || joinMachines.Contains(current)) && next == "doer" && attempt >= attempts)
             throw new InvalidOperationException($"task hit its limit of {attempts} attempts; work left uncommitted");
-        if (current == "validator" && next == "planner") { await Commit(); awaitingCommit = true; findings = "[]"; }
+        if ((current == "validator" || joinMachines.Contains(current)) && next == "planner") { await Commit(); awaitingCommit = true; findings = "[]"; }
         current = next;
     }
     await Commit(); Console.WriteLine("factory stopped"); return 0;

@@ -61,7 +61,7 @@ public sealed class FactorySteps
         Git("init", "-q"); Git("config", "user.name", "Factory Test"); Git("config", "user.email", "factory@example.test");
         Git("add", "."); Git("commit", "-qm", "Initial factory");
         Directory.CreateDirectory(Path.Combine(workspace, "agents"));
-        foreach (var name in new[] { "pi", "planner", "doer", "validator" })
+        foreach (var name in new[] { "pi", "planner", "doer", "validator", "reviewer_1", "reviewer_2", "reviewer_3", "synthesiser" })
         {
             var path = Path.Combine(workspace, "agents", name);
             File.Copy(Path.Combine(SourceRoot, "Steps/Doubles/agent.py"), path);
@@ -132,6 +132,8 @@ public sealed class FactorySteps
     public void MissingMachine(string name) => Assert.That(output, Does.Contain("no machine called \"" + name + "\""));
     [Then("it reports that finish cannot be reached from validator")]
     public void Unreachable() => Assert.That(output, Does.Contain("finish cannot be reached from validator"));
+    [Then("it reports that the branches from doer do not meet")]
+    public void BranchesDoNotMeet() => Assert.That(output, Does.Contain("the branches from doer do not meet"));
     [Then("it reports that the result of validator has no field {string}")]
     public void MissingField(string field) => Assert.That(output, Does.Contain("result of validator has no field \"" + field + "\""));
     [Then("the validator has not been called")]
@@ -304,7 +306,7 @@ public sealed class FactorySteps
     [Then("the doer has not been called")]
     public void NoDoer() => Assert.That(MachineCalls("doer"), Is.Empty);
     [Then("the factory has stopped")]
-    public void Stopped() => Assert.That(exitCode, Is.EqualTo(behavior.ContainsKey("prose_result") || behavior.GetValueOrDefault("validation") as string == "never" ? 1 : 0), output);
+    public void Stopped() => Assert.That(exitCode, Is.EqualTo(behavior.ContainsKey("prose_result") || behavior.ContainsKey("reviewer_prose") || behavior.ContainsKey("reviewer_missing") || behavior.GetValueOrDefault("synthesis") as string == "never" || behavior.GetValueOrDefault("validation") as string == "never" ? 1 : 0), output);
     [Then("the plan shows the first task as done")]
     public void FirstTaskDone() => Assert.That(File.ReadAllLines(Plan)[0], Is.EqualTo("- [x] alpha"));
     [Then("the plan shows the other two as not done")]
@@ -488,7 +490,8 @@ public sealed class FactorySteps
     public void FirstTaskNotGiven()
     {
         Assert.That(File.Exists(Path.Combine(target, "alpha.txt")), Is.True);
-        Assert.That(Prompt(MachineCalls("validator")[0]), Does.Not.Contain("work for alpha").And.Not.Contain("alpha.txt"));
+        var role = MachineCalls("synthesiser").Length > 0 ? "synthesiser" : "validator";
+        Assert.That(Prompt(MachineCalls(role)[0]), Does.Not.Contain("work for alpha").And.Not.Contain("alpha.txt"));
     }
     [Then("the doer was given the validator's findings")]
     public void FindingsGiven()
@@ -496,6 +499,83 @@ public sealed class FactorySteps
         Assert.That(MachineCalls("doer"), Has.Length.GreaterThanOrEqualTo(2));
         Assert.That(Prompt(MachineCalls("doer")[1]), Does.Contain((string)behavior["finding"]));
     }
+    [Given("the target has the three big brains")]
+    public void ThreeBrains()
+    {
+        foreach (var role in new[] { "reviewer_1", "reviewer_2", "reviewer_3", "synthesiser" })
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Machine(role))!);
+            File.WriteAllText(Machine(role), JsonSerializer.Serialize(new { harness = Path.Combine(harness, role), lens = "testability", model = role }));
+        }
+    }
+    [Given("the three big brains has replaced the validator on the {string} line")]
+    public void BrainsLine(string name)
+    {
+        currentLine = name;
+        ThreeBrains();
+        var line = File.ReadAllText(Line).Replace("doer -> validator", "doer -> reviewer_1\n  doer -> reviewer_2\n  doer -> reviewer_3\n  reviewer_1 -> synthesiser\n  reviewer_2 -> synthesiser\n  reviewer_3 -> synthesiser")
+            .Replace("validator ->", "synthesiser ->");
+        File.WriteAllText(Line, line);
+    }
+    [Given("every reviewer is always satisfied")]
+    public void ReviewersSatisfied() => behavior["reviewer_findings"] = new Dictionary<string, string[]>();
+    [Given("the synthesiser is always satisfied")]
+    public void SynthesiserSatisfied() => behavior["synthesis"] = "always";
+    [Given("a plan with one task, not done")]
+    public void OneTask()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(Plan)!);
+        File.WriteAllText(Plan, "- [ ] alpha\n");
+    }
+    [Given("no reviewer finishes until all three have begun")]
+    public void ReviewersWait() => behavior["reviewers_wait"] = true;
+    [Given("every reviewer is not satisfied, with a finding of its own: {string}, {string} or {string}")]
+    public void ReviewerFindings(string first, string second, string third) => behavior["reviewer_findings"] = new Dictionary<string, string[]>
+    { ["reviewer_1"] = [first], ["reviewer_2"] = [second], ["reviewer_3"] = [third] };
+    [Given("the second reviewer is not satisfied, with the finding {string}")]
+    public void SecondReviewerFinding(string finding) => behavior["reviewer_findings"] = new Dictionary<string, string[]> { ["reviewer_2"] = [finding] };
+    [Given("the synthesiser is never satisfied")]
+    public void SynthesiserNever() => behavior["synthesis"] = "never";
+    [Given("the synthesiser is not satisfied the first time")]
+    public void SynthesiserRetry() { behavior["synthesis"] = "retry"; behavior["synth_finding"] = "Fix the synthesiser's finding"; }
+    [Given("the second reviewer answers in prose, with no result")]
+    public void ReviewerProse() => behavior["reviewer_prose"] = "reviewer_2";
+    [Given("the second reviewer cannot be run")]
+    public void ReviewerMissing() { behavior["reviewer_missing"] = true; File.WriteAllText(Machine("reviewer_2"), JsonSerializer.Serialize(new { harness = Path.Combine(harness, "missing") })); }
+    [Given("the reviewers' lens is testability")]
+    public void ReviewerLens() => lens = "testability";
+    [Then("every reviewer has been called once")]
+    public void ReviewersCalledOnce() { foreach (var role in new[] { "reviewer_1", "reviewer_2", "reviewer_3" }) Assert.That(MachineCalls(role), Has.Length.EqualTo(1), output); }
+    [Then("the synthesiser has been called once")]
+    public void SynthesiserCalledOnce() => Assert.That(MachineCalls("synthesiser"), Has.Length.EqualTo(1), output);
+    [Then("the synthesiser has not been called")]
+    public void SynthesiserNotCalled() => Assert.That(MachineCalls("synthesiser"), Is.Empty);
+    [Then("every reviewer was asked for a result")]
+    public void ReviewerResultsRequested() { foreach (var role in new[] { "reviewer_1", "reviewer_2", "reviewer_3" }) Assert.That(Prompt(MachineCalls(role).First()), Does.Contain("JSON").And.Contain("result")); }
+    [Then("the synthesiser was given {string}, {string} and {string}")]
+    public void SynthesiserGivenThree(string first, string second, string third) { var prompt = Prompt(MachineCalls("synthesiser").First()); foreach (var item in new[] { first, second, third }) Assert.That(prompt, Does.Contain(item)); }
+    [Then("the synthesiser was given {string}")]
+    public void SynthesiserGiven(string finding) => Assert.That(Prompt(MachineCalls("synthesiser").First()), Does.Contain(finding));
+    [Then("the doer was given the synthesiser's findings")]
+    public void SynthesiserFindingsGiven() => Assert.That(Prompt(MachineCalls("doer")[1]), Does.Contain((string)behavior["synth_finding"]));
+    [Then("it was not given {string}")]
+    public void DoerNotGivenReviewerFinding(string finding) => Assert.That(Prompt(MachineCalls("doer")[1]), Does.Not.Contain(finding));
+    [Then("it reports that it could not read reviewer_2's result")]
+    public void ReviewerResultError() { Assert.That(exitCode, Is.Not.Zero); Assert.That(output, Does.Contain("could not read the reviewer_2's result")); }
+    [Then("it reports that it could not run reviewer_2")]
+    public void ReviewerRunError() { Assert.That(exitCode, Is.Not.Zero); Assert.That(output, Does.Contain("could not run the reviewer_2")); }
+    [Then("every reviewer was given the work for the second task")]
+    public void ReviewersGotSecondTask() { foreach (var role in new[] { "reviewer_1", "reviewer_2", "reviewer_3" }) Assert.That(Prompt(MachineCalls(role)[0]), Does.Contain("work for beta").And.Not.Contain("work for alpha")); }
+    [Then("every reviewer was given the same prompt")]
+    public void SameReviewerPrompt()
+    {
+        var prompts = new[] { "reviewer_1", "reviewer_2", "reviewer_3" }.Select(role => Prompt(MachineCalls(role)[0]).Split('\n', 2)[1]).ToArray();
+        Assert.That(prompts.Distinct().ToArray(), Has.Length.EqualTo(1));
+        var models = new[] { "reviewer_1", "reviewer_2", "reviewer_3" }.Select(role => JsonDocument.Parse(MachineCalls(role)[0]).RootElement.GetProperty("args").EnumerateArray().Select(arg => arg.GetString()).ToArray()[3]).ToArray();
+        Assert.That(models.Distinct().ToArray(), Has.Length.EqualTo(3));
+    }
+    [Then("every reviewer was given {string}")]
+    public void ReviewerLensGiven(string value) { foreach (var role in new[] { "reviewer_1", "reviewer_2", "reviewer_3" }) Assert.That(Prompt(MachineCalls(role)[0]), Does.Contain(value)); }
     [Test]
     public void PlannerCannotFinishWithoutRecordingCommittedWork()
     {
