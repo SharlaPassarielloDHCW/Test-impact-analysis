@@ -24,60 +24,19 @@ let currentPiece = null;
 let currentX = 0;
 let currentY = 0;
 
-// Create screen
-const screen = blessed.screen({
-  smartCSR: true,
-  title: 'Tetris',
-});
-
-// Main container - everything within 24 rows
-const container = blessed.box({
-  top: 0,
-  left: 0,
-  width: '100%',
-  height: 24,
-});
-
-// Game board with border
-// Width: 10 cells * 2 chars + 2 border = 22
-// Height: 20 rows + 2 border = 22
-const boardBox = blessed.box({
-  top: 0,
-  left: 0,
-  width: 22,
-  height: 22,
-  border: { type: 'line' },
-  style: {
-    border: { fg: 'cyan' },
-    fg: 'white',
-  },
-});
-
-// Info panel with border
-const infoBox = blessed.box({
-  top: 0,
-  left: 24,
-  width: 26,
-  height: 22,
-  border: { type: 'line' },
-  style: {
-    border: { fg: 'cyan' },
-    fg: 'white',
-  },
-  tags: true,
-});
+let screen, boardBox, infoBox;
 
 // Build a display grid combining the locked board + current active piece
-function buildDisplay() {
-  const display = board.map(row => row.slice());
+function buildDisplay(boardState, piece, x, y) {
+  const display = boardState.map(row => row.slice());
 
-  if (currentPiece) {
-    const shape = currentPiece.shape;
-    for (let y = 0; y < shape.length; y++) {
-      for (let x = 0; x < shape[y].length; x++) {
-        if (shape[y][x]) {
-          const by = currentY + y;
-          const bx = currentX + x;
+  if (piece) {
+    const shape = piece.shape;
+    for (let r = 0; r < shape.length; r++) {
+      for (let c = 0; c < shape[r].length; c++) {
+        if (shape[r][c]) {
+          const by = y + r;
+          const bx = x + c;
           if (by >= 0 && by < BOARD_HEIGHT && bx >= 0 && bx < BOARD_WIDTH) {
             display[by][bx] = 1;
           }
@@ -88,23 +47,23 @@ function buildDisplay() {
   return display;
 }
 
-function renderBoard() {
-  const display = buildDisplay();
+function renderBoard(boardState, piece, x, y) {
+  const display = buildDisplay(boardState, piece, x, y);
   const lines = [];
-  for (let y = 0; y < BOARD_HEIGHT; y++) {
+  for (let r = 0; r < BOARD_HEIGHT; r++) {
     let line = '';
-    for (let x = 0; x < BOARD_WIDTH; x++) {
-      line += display[y][x] ? '██' : '  ';
+    for (let c = 0; c < BOARD_WIDTH; c++) {
+      line += display[r][c] ? '██' : '  ';
     }
     lines.push(line);
   }
-  boardBox.setContent(lines.join('\n'));
+  return lines.join('\n');
 }
 
-function renderInfo() {
+function renderInfo(currentScore, isGameOver) {
   const lines = [
     '  SCORE',
-    '  ' + String(score),
+    '  ' + String(currentScore),
     '',
     '  CONTROLS',
     '  ' + String.fromCharCode(0x2190) + ' ' + String.fromCharCode(0x2192) + ' move',
@@ -113,47 +72,59 @@ function renderInfo() {
     '  space hard drop',
     '  q quit',
   ];
-  if (gameOver) {
+  if (isGameOver) {
     lines.push('');
     lines.push('{red-fg}  GAME OVER{/red-fg}');
   }
-  infoBox.setContent(lines.join('\n'));
+  return lines.join('\n');
 }
 
-function render() {
-  renderBoard();
-  renderInfo();
+function render(boardState, piece, x, y, currentScore, isGameOver) {
+  return {
+    board: renderBoard(boardState, piece, x, y),
+    info: renderInfo(currentScore, isGameOver),
+  };
+}
+
+// Internal function to push content to the blessed screen
+function updateScreen() {
+  boardBox.setContent(renderBoard(board, currentPiece, currentX, currentY));
+  infoBox.setContent(renderInfo(score, gameOver));
   screen.render();
 }
 
 // Place a piece permanently onto the board
-function lockPiece() {
-  if (!currentPiece) return;
-  const shape = currentPiece.shape;
-  for (let y = 0; y < shape.length; y++) {
-    for (let x = 0; x < shape[y].length; x++) {
-      if (shape[y][x]) {
-        const by = currentY + y;
-        const bx = currentX + x;
+function lockPiece(boardState, piece, x, y) {
+  const newBoard = boardState.map(row => row.slice());
+  if (!piece) return newBoard;
+  const shape = piece.shape;
+  for (let py = 0; py < shape.length; py++) {
+    for (let px = 0; px < shape[py].length; px++) {
+      if (shape[py][px]) {
+        const by = y + py;
+        const bx = x + px;
         if (by >= 0 && by < BOARD_HEIGHT && bx >= 0 && bx < BOARD_WIDTH) {
-          board[by][bx] = 1;
+          newBoard[by][bx] = 1;
         }
       }
     }
   }
+  return newBoard;
 }
 
 // Spawn a new piece at the top center
-function spawnPiece() {
+function spawnPiece(random = Math.random) {
   const names = Object.keys(PIECES);
-  const name = names[Math.floor(Math.random() * names.length)];
-  currentPiece = PIECES[name];
-  currentX = Math.floor((BOARD_WIDTH - currentPiece.shape[0].length) / 2);
-  currentY = 0;
+  const name = names[Math.floor(random() * names.length)];
+  const piece = PIECES[name];
+  const x = Math.floor((BOARD_WIDTH - piece.shape[0].length) / 2);
+  const y = 0;
+  return { piece, x, y };
 }
 
-// Check if current piece position is valid
-function isValidPosition(piece, x, y) {
+// Check if piece position is valid on a given board
+function isValidPosition(boardState, piece, x, y) {
+  if (!piece) return true;
   const shape = piece.shape;
   for (let sy = 0; sy < shape.length; sy++) {
     for (let sx = 0; sx < shape[sy].length; sx++) {
@@ -161,7 +132,7 @@ function isValidPosition(piece, x, y) {
         const nx = x + sx;
         const ny = y + sy;
         if (nx < 0 || nx >= BOARD_WIDTH || ny >= BOARD_HEIGHT) return false;
-        if (ny >= 0 && board[ny][nx]) return false;
+        if (ny >= 0 && boardState[ny][nx]) return false;
       }
     }
   }
@@ -170,6 +141,7 @@ function isValidPosition(piece, x, y) {
 
 // Rotate a piece clockwise
 function rotate(piece) {
+  if (!piece) return piece;
   const shape = piece.shape;
   const rows = shape.length;
   const cols = shape[0].length;
@@ -182,102 +154,189 @@ function rotate(piece) {
   return { ...piece, shape: rotated };
 }
 
-// Hard drop: move piece all the way down
-function hardDrop() {
-  while (isValidPosition(currentPiece, currentX, currentY + 1)) {
-    currentY++;
+// Hard drop: move piece all the way down and lock it
+function hardDrop(boardState, piece, x, y) {
+  if (!piece) return { board: boardState, x, y };
+  let dropY = y;
+  while (isValidPosition(boardState, piece, x, dropY + 1)) {
+    dropY++;
   }
-  lockPiece();
-  spawnPiece();
-  if (!isValidPosition(currentPiece, currentX, currentY)) {
-    gameOver = true;
-  }
+  const newBoard = lockPiece(boardState, piece, x, dropY);
+  return { board: newBoard, x, y: dropY };
 }
 
 // Clear completed lines and return count
-function clearLines() {
+function clearLines(boardState) {
   let linesCleared = 0;
-  for (let y = BOARD_HEIGHT - 1; y >= 0; y--) {
-    if (board[y].every(cell => cell !== 0)) {
-      board.splice(y, 1);
-      board.unshift(Array(BOARD_WIDTH).fill(0));
+  const newBoard = [];
+  for (let y = 0; y < BOARD_HEIGHT; y++) {
+    if (boardState[y].every(cell => cell !== 0)) {
       linesCleared++;
-      y++; // recheck this row
+    } else {
+      newBoard.push(boardState[y].slice());
     }
   }
-  return linesCleared;
+  while (newBoard.length < BOARD_HEIGHT) {
+    newBoard.unshift(Array(BOARD_WIDTH).fill(0));
+  }
+  return { board: newBoard, linesCleared };
 }
 
 // Update score based on lines cleared
-function updateScore(lines) {
+function updateScore(currentScore, lines) {
   const points = [0, 100, 300, 500, 800];
-  score += points[lines] || 0;
+  return currentScore + (points[lines] || 0);
+}
+
+// Handle piece settling after lock (clear lines, update score, spawn next piece)
+function settlePiece(boardState, currentScore, random = Math.random) {
+  const { board: clearedBoard, linesCleared } = clearLines(boardState);
+  const newScore = updateScore(currentScore, linesCleared);
+  const { piece, x, y } = spawnPiece(random);
+  const isGameOver = !isValidPosition(clearedBoard, piece, x, y);
+  return {
+    board: clearedBoard,
+    score: newScore,
+    piece,
+    x,
+    y,
+    gameOver: isGameOver,
+  };
 }
 
 // Tick: move piece down one row
-function tick() {
-  if (gameOver) return;
-  if (isValidPosition(currentPiece, currentX, currentY + 1)) {
-    currentY++;
-  } else {
-    lockPiece();
-    const lines = clearLines();
-    updateScore(lines);
-    spawnPiece();
-    if (!isValidPosition(currentPiece, currentX, currentY)) {
-      gameOver = true;
-    }
+function tick(boardState, piece, x, y, currentScore, isGameOver, random = Math.random) {
+  if (isGameOver) {
+    return { board: boardState, piece, x, y, score: currentScore, gameOver: true };
   }
-  render();
+  if (isValidPosition(boardState, piece, x, y + 1)) {
+    return { board: boardState, piece, x, y: y + 1, score: currentScore, gameOver: false };
+  }
+  const newBoard = lockPiece(boardState, piece, x, y);
+  return settlePiece(newBoard, currentScore, random);
 }
 
-// Input handling
-screen.key(['q', 'C-c'], () => process.exit(0));
+// ---- Impure section: top-level state management and I/O ----
 
-screen.key(['left'], () => {
-  if (gameOver) return;
-  if (isValidPosition(currentPiece, currentX - 1, currentY)) {
-    currentX--;
-    render();
-  }
-});
+function startGame() {
+  screen = blessed.screen({ smartCSR: true, title: 'Tetris' });
+  const container = blessed.box({ top: 0, left: 0, width: '100%', height: 24 });
+  boardBox = blessed.box({
+    top: 0, left: 0, width: 22, height: 22,
+    border: { type: 'line' },
+    style: { border: { fg: 'cyan' }, fg: 'white' },
+  });
+  infoBox = blessed.box({
+    top: 0, left: 24, width: 26, height: 22,
+    border: { type: 'line' },
+    style: { border: { fg: 'cyan' }, fg: 'white' },
+    tags: true,
+  });
 
-screen.key(['right'], () => {
-  if (gameOver) return;
-  if (isValidPosition(currentPiece, currentX + 1, currentY)) {
-    currentX++;
-    render();
-  }
-});
+  // Input handling
+  screen.key(['q', 'C-c'], () => process.exit(0));
 
-screen.key(['up'], () => {
-  if (gameOver) return;
-  const rotated = rotate(currentPiece);
-  if (isValidPosition(rotated, currentX, currentY)) {
-    currentPiece = rotated;
-    render();
-  }
-});
+  screen.key(['left'], () => {
+    if (gameOver) return;
+    if (isValidPosition(board, currentPiece, currentX - 1, currentY)) {
+      currentX--;
+      updateScreen();
+    }
+  });
 
-screen.key(['down'], () => {
-  if (gameOver) return;
-  tick();
-});
+  screen.key(['right'], () => {
+    if (gameOver) return;
+    if (isValidPosition(board, currentPiece, currentX + 1, currentY)) {
+      currentX++;
+      updateScreen();
+    }
+  });
 
-screen.key(['space'], () => {
-  if (gameOver) return;
-  hardDrop();
-  render();
-});
+  screen.key(['up'], () => {
+    if (gameOver) return;
+    const rotated = rotate(currentPiece);
+    if (isValidPosition(board, rotated, currentX, currentY)) {
+      currentPiece = rotated;
+      updateScreen();
+    }
+  });
 
-// Assemble the layout
-container.append(boardBox);
-container.append(infoBox);
-screen.append(container);
+  screen.key(['down'], () => {
+    if (gameOver) return;
+    const result = tick(board, currentPiece, currentX, currentY, score, gameOver);
+    board = result.board;
+    currentPiece = result.piece;
+    currentX = result.x;
+    currentY = result.y;
+    score = result.score;
+    gameOver = result.gameOver;
+    updateScreen();
+  });
 
-// Start the game
-spawnPiece();
-render();
+  screen.key(['space'], () => {
+    if (gameOver) return;
+    const dropResult = hardDrop(board, currentPiece, currentX, currentY);
+    board = dropResult.board;
+    currentY = dropResult.y;
+    const settleResult = settlePiece(board, score);
+    board = settleResult.board;
+    score = settleResult.score;
+    currentPiece = settleResult.piece;
+    currentX = settleResult.x;
+    currentY = settleResult.y;
+    gameOver = settleResult.gameOver;
+    updateScreen();
+  });
 
-// Game loop timer
-setInterval(tick, 1000);
+  // Assemble the layout
+  container.append(boardBox);
+  container.append(infoBox);
+  screen.append(container);
+
+  // Start the game
+  const start = spawnPiece();
+  currentPiece = start.piece;
+  currentX = start.x;
+  currentY = start.y;
+  updateScreen();
+
+  // Game loop timer
+  setInterval(() => {
+    const result = tick(board, currentPiece, currentX, currentY, score, gameOver);
+    board = result.board;
+    currentPiece = result.piece;
+    currentX = result.x;
+    currentY = result.y;
+    score = result.score;
+    gameOver = result.gameOver;
+    updateScreen();
+  }, 1000);
+}
+
+if (require.main === module) startGame();
+
+// Exports for testability
+module.exports = {
+  BOARD_WIDTH,
+  BOARD_HEIGHT,
+  PIECES,
+  get board() { return board; },
+  get score() { return score; },
+  get gameOver() { return gameOver; },
+  get currentPiece() { return currentPiece; },
+  get currentX() { return currentX; },
+  get currentY() { return currentY; },
+  buildDisplay,
+  renderBoard,
+  renderInfo,
+  render,
+  lockPiece,
+  spawnPiece,
+  isValidPosition,
+  rotate,
+  hardDrop,
+  clearLines,
+  updateScore,
+  settlePiece,
+  tick,
+};
