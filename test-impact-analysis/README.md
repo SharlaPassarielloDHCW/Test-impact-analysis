@@ -1,7 +1,8 @@
-# Test impact analysis — iteration 001
+# Test impact analysis — iteration 002
 
 Maps changed JavaScript functions to their direct and transitive production
-callers. This iteration analyzes code impact; it does not select or run tests.
+callers, then recommends individual `node:test` cases that call those functions.
+Test execution belongs to iteration 003.
 
 Install and verify:
 
@@ -16,7 +17,7 @@ From this repository root or `test-impact-analysis/`:
 node test-impact-analysis/bin/test-impact-analysis.js \
   --base <base-commit> --head <head-commit> \
   --source tetris/tetris-002 \
-  --report test-impact-analysis/reports/code-impact.html
+  --report test-impact-analysis/reports/test-selection.html
 ```
 
 When starting inside `test-impact-analysis/`, use `node bin/test-impact-analysis.js`.
@@ -35,6 +36,18 @@ uncommitted source edits are ignored. The analyzer never runs the target's tests
   removed functions, dynamic imports, and calls the analyzer cannot resolve.
 - No production changes produces an explicit empty result, even if ignored
   files changed. Both outputs use deterministic ordering.
+- `testCases` lists each discovered `.test.js` or `.spec.js` case at the head
+  commit. `linked` cases have a direct call to a changed or impacted function;
+  their `links` contain the production call path. `uncertain` cases have an
+  unresolved test call or a relevant code uncertainty. Both are recommended.
+  `excluded` cases show why no link was found. `recommended` is a Boolean for
+  consumers of the JSON report.
+- The HTML test selection table spells out **Selected — linked**, **Selected —
+  uncertain**, or **Not selected** for every case, with its file, line, and
+  reason. The summary counts selected and not selected cases.
+- `testDiscoveryIssues` lists files that could not be parsed. Review these
+  before relying on the selection. A test file with no discoverable cases
+  cannot be safely classified.
 
 Named ES module imports and exports (including aliases), function declarations,
 and direct calls are supported. Arrow functions, callbacks, methods, re-exports,
@@ -42,11 +55,15 @@ package imports, and shadowed bindings are not resolved into confirmed edges.
 Unresolved calls across the source subtree are reported conservatively when
 production files change; these warnings do not prove that the call is affected.
 This is a static approximation, not proof that all runtime impacts are known.
+Case discovery supports named `node:test` calls with string titles and named
+relative imports. Dynamic or computed calls inside a case are marked uncertain.
+Tests that reach production through nested helpers, callbacks, or dynamic
+imports may need manual review. The report is a recommendation, not a record of
+executed tests.
 
 Test directories, `node_modules`, build/dist/coverage/generated directories,
 `.test.js`, `.spec.js`, `.min.js`, and `.bundle.js` files are ignored. Other
 repository-specific generated files may need additional exclusion rules.
 
-Acceptance checks create temporary Git repositories and cover direct,
-transitive, cross-module, uncertain, removed, cyclic, empty, invalid-input,
-output-failure, and committed-content scenarios.
+Acceptance checks create temporary Git repositories and cover code impact,
+case selection, uncertainty, exclusions, invalid inputs, and committed content.

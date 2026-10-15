@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 
 import { quote, parseModule, functionRanges, compareModules, mapCallers } from '../src/analysis.js';
+import { discoverTestCases, selectTests } from '../src/selection.js';
 
 export class ValidationError extends Error {
   constructor(message) {
@@ -30,7 +31,7 @@ export function deriveJsonReportPath(htmlPath) {
   return htmlPath.replace(/\.html?$/i, '') + '.json';
 }
 
-export function generateHtmlReport({ baseCommit, headCommit, sourcePath, changedFunctions = [], impactedFunctions = [], uncertainAreas = [], changedFiles = [] }) {
+export function generateHtmlReport({ baseCommit, headCommit, sourcePath, changedFunctions = [], impactedFunctions = [], uncertainAreas = [], changedFiles = [], testCases = [], testDiscoveryIssues = [] }) {
   let html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -40,6 +41,14 @@ export function generateHtmlReport({ baseCommit, headCommit, sourcePath, changed
 body { font-family: sans-serif; margin: 2rem; }
 h1 { border-bottom: 1px solid #ccc; padding-bottom: 0.5rem; }
 h2 { margin-top: 1.5rem; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border: 1px solid #ccc; padding: 0.65rem; text-align: left; vertical-align: top; }
+th { background: #f3f4f6; }
+tbody tr:nth-child(even) { background: #fafafa; }
+.decision { font-weight: 700; white-space: nowrap; }
+.linked { color: #166534; }
+.excluded { color: #374151; }
+code { overflow-wrap: anywhere; }
 .changed { color: #0066cc; }
 .removed { color: #cc0000; }
 .added { color: #009900; }
@@ -83,11 +92,31 @@ ul { line-height: 1.6; }
     }
   }
 
+  const counts = Object.fromEntries(['linked', 'uncertain', 'excluded'].map(status => [status, testCases.filter(item => item.status === status).length]));
+  html += `\n<h2>Test selection</h2><p>${counts.linked + counts.uncertain} selected (${counts.linked} linked, ${counts.uncertain} uncertain); ${counts.excluded} not selected. Cases are from the head commit. No tests were run.</p>`;
+  if (!testCases.length) html += '<p>No test cases were discovered in the source subtree.</p>';
+  else {
+    html += '<table><thead><tr><th scope="col">Decision</th><th scope="col">Test case</th><th scope="col">Why</th></tr></thead><tbody>';
+    for (const item of testCases) {
+      const decision = item.status === 'linked' ? 'Selected — linked'
+        : item.status === 'uncertain' ? 'Selected — uncertain' : 'Not selected';
+      const links = item.links.map(link => `Calls ${link.function.module}#${link.function.name}; impact path: ${link.callPath.map(fn => `${fn.module}#${fn.name}`).join(' → ')}`);
+      const explanations = [...links, ...item.reasons];
+      html += `<tr><td class="decision ${item.status}">${escapeHtml(decision)}</td>`;
+      html += `<td>${escapeHtml(item.name)}<br><code>${escapeHtml(`${item.file}:${item.line}`)}</code></td>`;
+      html += `<td><ul>${explanations.map(reason => `<li>${escapeHtml(reason)}</li>`).join('')}</ul></td></tr>`;
+    }
+    html += '</tbody></table>';
+  }
+  if (testDiscoveryIssues.length) {
+    html += `<h3>Test discovery issues</h3><p>These files could not be classified; review them before using this selection.</p><ul>${testDiscoveryIssues.map(issue => `<li>${escapeHtml(`${issue.file}: ${issue.reason}`)}</li>`).join('')}</ul>`;
+  }
+
   html += `\n</body>\n</html>`;
   return html;
 }
 
-export function generateJsonReport({ baseCommit, headCommit, sourcePath, reportPath, changedFunctions = [], impactedFunctions = [], uncertainAreas = [], changedFiles = [] }) {
+export function generateJsonReport({ baseCommit, headCommit, sourcePath, reportPath, changedFunctions = [], impactedFunctions = [], uncertainAreas = [], changedFiles = [], testCases = [], testDiscoveryIssues = [] }) {
   return JSON.stringify({
     baseCommit,
     headCommit,
@@ -97,6 +126,8 @@ export function generateJsonReport({ baseCommit, headCommit, sourcePath, reportP
     changedFunctions,
     impactedFunctions,
     uncertainAreas,
+    testCases,
+    testDiscoveryIssues,
   }, null, 2);
 }
 
@@ -293,12 +324,15 @@ export async function runWorkflow({
 
   const changedFiles = getChangedProductionFiles(gitRoot, baseCommit, headCommit, resolvedSource, execGit);
   let impactedFunctions = [];
+  const exportsByModule = new Map();
+  const files = execGit(gitRoot, `ls-tree -r --name-only -z ${quote(headCommit)} -- ${quote(resolvedSource)}`, { raw: true });
   if (changedFiles.length) {
     const modules = new Map();
-    const files = execGit(gitRoot, `ls-tree -r --name-only -z ${quote(headCommit)} -- ${quote(resolvedSource)}`, { raw: true });
     for (const file of files.split('\0').filter(isProductionJsFile).sort()) {
       try {
-        modules.set(file, parseModule(getFileContentAtCommit(gitRoot, headCommit, file, execGit), file));
+        const parsed = parseModule(getFileContentAtCommit(gitRoot, headCommit, file, execGit), file);
+        modules.set(file, parsed);
+        exportsByModule.set(file, parsed.exports);
       } catch (error) {
         uncertainAreas.push({ module: file, reason: `JavaScript parse failed: ${error.message}` });
       }
@@ -319,6 +353,9 @@ export async function runWorkflow({
     impactedFunctions,
     uncertainAreas: uniqueUncertainty,
   };
+
+  const discovered = discoverTestCases(files.split('\0').filter(Boolean), file => getFileContentAtCommit(gitRoot, headCommit, file, execGit));
+  Object.assign(impactMap, selectTests(discovered, impactMap, exportsByModule));
 
   const htmlContent = generateHtmlReport(impactMap);
   const jsonContent = generateJsonReport(impactMap);

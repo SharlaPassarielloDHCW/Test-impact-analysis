@@ -139,3 +139,74 @@ test('CLI runs from root and nested directory, handles quoted paths, and protect
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Error:/);
 });
+
+test('individual cases are linked, uncertain, or excluded with reviewable reasons', async t => {
+  const f = fixture(t, {
+    'src/core.js': `function target() { return 1; }
+export { target as publicTarget };
+export function caller() { return target(); }
+export function unrelated() { return 4; }`,
+    'src/tests/core.test.js': `import test from 'node:test';
+import { publicTarget as direct, caller, unrelated } from '../core.js';
+function throughHelper() { return caller(); }
+test('direct <case>', () => direct());
+test('transitive case', () => caller());
+test('helper case', () => throughHelper());
+test('unrelated case', () => unrelated());
+test('uncertain case', () => { unrelated(); object[key](); });`,
+  });
+  f.write({ 'src/core.js': `function target() { return 2; }
+export { target as publicTarget };
+export function caller() { return target(); }
+export function unrelated() { return 4; }` });
+  const head = f.commit();
+  const map = await f.report(head);
+  assert.deepEqual(map.testCases.map(item => [item.name, item.status]), [
+    ['direct <case>', 'linked'], ['transitive case', 'linked'], ['helper case', 'linked'],
+    ['unrelated case', 'excluded'], ['uncertain case', 'uncertain'],
+  ]);
+  assert.deepEqual(map.testCases[0].links[0].callPath.map(fn => fn.name), ['target']);
+  assert.deepEqual(map.testCases[1].links[0].callPath.map(fn => fn.name), ['caller', 'target']);
+  assert.deepEqual(map.testCases[2].links[0].callPath.map(fn => fn.name), ['caller', 'target']);
+  assert.match(map.testCases[3].reasons[0], /no call/);
+  assert.match(map.testCases[4].reasons[0], /computed call/);
+  const html = readFileSync(join(f.root, 'report.html'), 'utf8');
+  assert.match(html, /4 selected \(3 linked, 1 uncertain\); 1 not selected/);
+  assert.match(html, /<th scope="col">Decision<\/th><th scope="col">Test case<\/th><th scope="col">Why<\/th>/);
+  assert.match(html, /Selected — linked/);
+  assert.match(html, /Selected — uncertain/);
+  assert.match(html, /Not selected/);
+  assert.match(html, /Calls src\/core\.js#caller; impact path: src\/core\.js#caller → src\/core\.js#target/);
+  assert.match(html, /no call to a changed or impacted function was found/);
+  assert.match(html, /computed call at line/);
+  assert.match(html, /direct &lt;case&gt;/);
+  assert.doesNotMatch(html, /direct <case>/);
+  assert.deepEqual(await f.report(head), map);
+});
+
+test('irrelevant changes exclude discovered cases without running them', async t => {
+  const f = fixture(t, {
+    'src/core.js': 'export function value() { return 1; }',
+    'src/tests/core.test.js': "import test from 'node:test'; import { value } from '../core.js'; test('value case', () => value());",
+    'README.md': 'before',
+  });
+  f.write({ 'README.md': 'after' });
+  const map = await f.report(f.commit());
+  assert.equal(map.testCases.length, 1);
+  assert.equal(map.testCases[0].status, 'excluded');
+  assert.deepEqual(map.changedFunctions, []);
+});
+
+test('module-level changes make importing cases uncertain and malformed test files remain visible', async t => {
+  const f = fixture(t, {
+    'src/core.js': 'const value = 1; export function getValue() { return value; }',
+    'src/tests/core.test.js': "import test from 'node:test'; import { getValue } from '../core.js'; test('value case', () => getValue());",
+    'src/tests/broken.test.js': 'test(',
+  });
+  f.write({ 'src/core.js': 'const value = 2; export function getValue() { return value; }' });
+  const map = await f.report(f.commit());
+  assert.equal(map.testCases[0].status, 'uncertain');
+  assert.match(map.testCases[0].reasons[0], /outside a named function/);
+  assert.equal(map.testDiscoveryIssues.length, 1);
+  assert.match(map.testDiscoveryIssues[0].reason, /could not be parsed/);
+});
