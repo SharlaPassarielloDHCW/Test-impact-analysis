@@ -10,6 +10,9 @@ HTML into jsdom, dispatch user events, and check the resulting page and saved
 state. The tests do not require a browser or external service.
 Selected cases also call named task functions directly so the static analyzer has
 clear links to individual behaviors alongside the UI checks.
+`functional-tests/test-cases.json` gives every case a stable ID, title, and
+one-sentence description for future reports. Match cases by `file` and `title`;
+`npm test` checks that the catalog and test names stay in sync.
 
 From this folder:
 

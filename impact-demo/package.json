@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test functional-tests/*.test.js"
+    "test": "node functional-tests/check-metadata.js && node --test functional-tests/*.test.js"
   },
   "devDependencies": {
     "jsdom": "^26.1.0"
