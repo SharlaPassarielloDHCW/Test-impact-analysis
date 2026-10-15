@@ -410,6 +410,21 @@ public sealed class FactorySteps
         Assert.That(MachineCalls("doer"), Has.Length.GreaterThanOrEqualTo(2));
         Assert.That(Prompt(MachineCalls("doer")[1]), Does.Contain((string)behavior["finding"]));
     }
+    [Test]
+    public void PlannerCannotFinishWithoutRecordingCommittedWork()
+    {
+        try
+        {
+            CopyFactory(); NewTarget(); Seed(); Planner(); Doer(); Validator(); ThreeTasks();
+            behavior["planner_skips_update"] = true;
+            Invoke(true);
+            Assert.That(exitCode, Is.Not.Zero, output);
+            Assert.That(output, Does.Contain("planner did not update the plan after committed work"));
+            Assert.That(WorkCommits, Has.Length.EqualTo(1));
+            NoneDone();
+        }
+        finally { Cleanup(); }
+    }
     [AfterScenario]
     public void Cleanup() { if (Directory.Exists(workspace)) Directory.Delete(workspace, true); }
 }

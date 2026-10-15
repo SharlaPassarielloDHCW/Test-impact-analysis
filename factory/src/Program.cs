@@ -56,6 +56,7 @@ if (repository.Code != 0) { if ((await Run(target, "git", "init", "--quiet")).Co
 var rootPath = repository.Output.Trim();
 var pathspec = ":(literal)" + Path.GetRelativePath(rootPath, target);
 var plan = Path.Combine(target, ".factory", "plan.md");
+var planPathspec = ":(literal)" + Path.GetRelativePath(rootPath, plan);
 var excludeState = ":(exclude,literal)" + Path.GetRelativePath(rootPath, Path.Combine(target, ".factory"));
 var context = $"Read the seed at {JsonSerializer.Serialize(seed)} and the plan at {JsonSerializer.Serialize(plan)}. Work only in the current target. Do not commit; the factory handles Git.";
 async Task<string> Git(params string[] arguments) { var result = await Run(rootPath, "git", arguments); if (result.Code != 0) throw new InvalidOperationException("Git operation failed"); return result.Output; }
@@ -113,11 +114,15 @@ try
         JsonElement result;
         if (current == "planner")
         {
-            if (awaitingCommit) { await Commit(); awaitingCommit = false; }
-            var instruction = attempt > 0 && findings == "[]"
-                ? "Record the committed task: mark the first unfinished task done now that its work has been validated and committed. Preserve its recorded findings and subtasks. Report whether any tasks remain."
-                : "If the plan is missing, create a few tasks from the seed without doing product work. Otherwise inspect it without changing it and report whether it is complete.";
+            var recordCommittedTask = awaitingCommit;
+            if (recordCommittedTask) { await Commit(); awaitingCommit = false; }
+            var instruction = recordCommittedTask
+                ? "Record the committed task: update the plan now to mark exactly the first unfinished task done. Preserve every other task and its findings and subtasks. Do not report completion until this update is written to disk."
+                : "If the plan is missing, create a few tasks from the seed without doing product work. Otherwise inspect it; if task statuses are unclear, clarify them in the plan without changing the tasks.";
+            instruction += " Make each task's done or unfinished state explicit in the plan. Report complete: true only if every task is marked done; otherwise report complete: false.";
             result = await Call(current, $"{context}\n{instruction}\nChange only the plan, never product code. {request}");
+            if (recordCommittedTask && (await Git("diff", "HEAD", "--", planPathspec)).Length == 0)
+                throw new InvalidOperationException("planner did not update the plan after committed work");
             if (!hadPlan) { await Commit(); hadPlan = true; }
             attempt = 0; findings = "[]";
         }
@@ -137,6 +142,7 @@ try
             findings = reported.GetRawText();
         }
         else result = await Call(current, $"{context}\n{request}");
+        Console.WriteLine($"{current}: {result.GetRawText()}");
         var next = Route(current, result).To;
         if (current == "validator" && next == "doer" && attempt >= attempts)
             throw new InvalidOperationException($"task hit its limit of {attempts} attempts; work left uncommitted");

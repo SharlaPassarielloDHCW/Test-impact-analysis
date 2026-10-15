@@ -31,7 +31,7 @@ if role == 'planner':
     if not plan.exists():
         plan.parent.mkdir(parents=True, exist_ok=True)
         plan.write_text('Next comes alpha, then beta.\n' if prose else ''.join(f'- [ ] {t}\n' for t in behavior['tasks']))
-    elif 'Record the committed task' in prompt:
+    elif 'Record the committed task' in prompt and not behavior.get('planner_skips_update'):
         task = next_task()
         if task:
             product = pathlib.Path(behavior.get('file', task + '.txt'))
@@ -40,7 +40,7 @@ if role == 'planner':
             assert committed == product.read_text(), 'Planner called before work was committed'
             text = plan.read_text()
             plan.write_text(text + f'Finished {task}.\n' if prose else text.replace('- [ ] ' + task, '- [x] ' + task, 1))
-    result = {'complete': next_task() is None}
+    result = {'complete': next_task() is None or ('Record the committed task' in prompt and behavior.get('planner_skips_update', False))}
 elif role == 'doer':
     task = next_task()
     assert task is not None
