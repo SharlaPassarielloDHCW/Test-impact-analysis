@@ -18,7 +18,8 @@ call = {'agent': agent, 'role': role, 'args': sys.argv[1:], 'cwd': os.getcwd()}
 with logfile.open('a') as log:
     log.write(json.dumps(call) + '\n')
 (workspace / f'call-{len(calls)}.json').write_text(json.dumps(call))
-plan = pathlib.Path('.factory/plan.md')
+plan_match = re.search(r'plan at ("[^"]+")', prompt)
+plan = pathlib.Path(json.loads(plan_match.group(1))) if plan_match else pathlib.Path('.factory/plan.md')
 prose = behavior.get('prose_plan', False)
 
 def next_task():

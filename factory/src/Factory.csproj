@@ -5,7 +5,4 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
-  <ItemGroup>
-    <Content Include="assembly-line/**;machines/**" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
 </Project>

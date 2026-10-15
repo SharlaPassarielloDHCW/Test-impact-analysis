@@ -14,17 +14,54 @@ async Task<(int Code, string Output)> Run(string directory, string command, para
     if (process.ExitCode != 0) Console.Error.Write(error);
     return (process.ExitCode, await stdout);
 }
-var home = AppContext.BaseDirectory;
+var factory = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+while (Path.GetFileName(factory) != "factory") factory = Directory.GetParent(factory)!.FullName;
+var runName = Option("--run");
+if (string.IsNullOrWhiteSpace(runName) || runName != Path.GetFileName(runName) || runName is "." or "..")
+{ Console.Error.WriteLine("a run is required: provide --run <name>"); return 1; }
+var runFolder = Path.Combine(factory, "runs", runName);
+var settingsFile = Path.Combine(runFolder, "run.json");
+var seedArgument = Option("--seed");
+var targetArgument = Option("--target");
+var lineArgument = Option("--line");
+string seed, target, lineName;
+if (File.Exists(settingsFile))
+{
+    using var settings = JsonDocument.Parse(File.ReadAllText(settingsFile));
+    var saved = settings.RootElement;
+    seed = saved.GetProperty("seed").GetString()!;
+    target = saved.GetProperty("target").GetString()!;
+    lineName = saved.GetProperty("line").GetString()!;
+    if (targetArgument != null && Path.GetFullPath(targetArgument) != target)
+    { Console.Error.WriteLine($"the \"{runName}\" run already has a target"); return 1; }
+    if (seedArgument != null && Path.GetFullPath(seedArgument) != seed)
+    { Console.Error.WriteLine($"the \"{runName}\" run already has a seed"); return 1; }
+    if (lineArgument != null && lineArgument != lineName)
+    { Console.Error.WriteLine($"the \"{runName}\" run already has a line"); return 1; }
+}
+else
+{
+    if (targetArgument == null) { Console.Error.WriteLine("a target is required: provide --target <folder>"); return 1; }
+    if (lineArgument == null) { Console.Error.WriteLine("a line is required: provide --line <name>"); return 1; }
+    if (seedArgument == null) { Console.Error.WriteLine("no seed: provide --seed <file>"); return 1; }
+    seed = Path.GetFullPath(seedArgument);
+    target = Path.GetFullPath(targetArgument);
+    lineName = lineArgument;
+}
+if (!File.Exists(seed)) { Console.Error.WriteLine("no seed"); return 1; }
+if (!int.TryParse(Option("--attempts") ?? "3", out var attempts) || attempts < 1)
+{ Console.Error.WriteLine("--attempts must be a positive integer"); return 1; }
+var linePath = Path.Combine(target, ".assembly-lines", lineName + ".dot");
 var edges = new List<Edge>();
 var machines = new Dictionary<string, (string Harness, string Lens)>();
 try
 {
-    var line = File.ReadAllText(Path.Combine(home, "assembly-line", "line.dot"));
+    var line = File.ReadAllText(linePath);
     foreach (Match match in Regex.Matches(line, @"(?m)^[ \t]*(\w+)[ \t]*->[ \t]*(\w+)[ \t]*(?:\[label\s*=\s*""([^""]+)""\])?"))
         edges.Add(new(match.Groups[1].Value, match.Groups[2].Value, match.Groups[3].Success ? match.Groups[3].Value : null));
     foreach (var node in edges.SelectMany(e => new[] { e.From, e.To }).Distinct().Except(new[] { "start", "finish" }))
     {
-        var file = Path.Combine(home, "machines", node + ".json");
+        var file = Path.Combine(target, ".assembly-lines", ".machines", node, "config.json");
         if (!File.Exists(file)) throw new InvalidOperationException($"no machine called \"{node}\"");
         using var document = JsonDocument.Parse(File.ReadAllText(file));
         var root = document.RootElement;
@@ -43,28 +80,27 @@ try
 catch (Exception error) when (error is IOException or JsonException or InvalidOperationException)
 { Console.Error.WriteLine(error.Message); return 1; }
 if (args.Contains("--check-line")) { Console.WriteLine("assembly line accepted"); return 0; }
-var seedArgument = Option("--seed");
-if (seedArgument == null || !File.Exists(seedArgument)) { Console.Error.WriteLine("no seed: provide --seed <file>"); return 1; }
-var targetArgument = Option("--target");
-if (targetArgument == null) { Console.Error.WriteLine("a target is required: provide --target <folder>"); return 1; }
-if (!int.TryParse(Option("--attempts") ?? "3", out var attempts) || attempts < 1)
-{ Console.Error.WriteLine("--attempts must be a positive integer"); return 1; }
-var seed = Path.GetFullPath(seedArgument); var target = Path.GetFullPath(targetArgument);
+Directory.CreateDirectory(runFolder);
+if (!File.Exists(settingsFile)) File.WriteAllText(settingsFile, JsonSerializer.Serialize(new { seed, target, line = lineName }));
 Directory.CreateDirectory(target);
 var repository = await Run(target, "git", "rev-parse", "--show-toplevel");
-if (repository.Code != 0) { if ((await Run(target, "git", "init", "--quiet")).Code != 0) return 1; repository = await Run(target, "git", "rev-parse", "--show-toplevel"); }
+if (repository.Code != 0)
+{
+    if ((await Run(target, "git", "init", "--quiet")).Code != 0) return 1;
+    await Run(target, "git", "-c", "user.name=Factory", "-c", "user.email=factory@local", "commit", "--quiet", "--allow-empty", "-m", "Initialize target");
+    repository = await Run(target, "git", "rev-parse", "--show-toplevel");
+}
 var rootPath = repository.Output.Trim();
 var pathspec = ":(literal)" + Path.GetRelativePath(rootPath, target);
-var plan = Path.Combine(target, ".factory", "plan.md");
-var planPathspec = ":(literal)" + Path.GetRelativePath(rootPath, plan);
-var excludeState = ":(exclude,literal)" + Path.GetRelativePath(rootPath, Path.Combine(target, ".factory"));
+var plan = Path.Combine(runFolder, "plan.md");
+var excludeState = ":(exclude,literal)" + Path.GetRelativePath(rootPath, Path.Combine(target, ".assembly-lines"));
 var context = $"Read the seed at {JsonSerializer.Serialize(seed)} and the plan at {JsonSerializer.Serialize(plan)}. Work only in the current target. Do not commit; the factory handles Git.";
 async Task<string> Git(params string[] arguments) { var result = await Run(rootPath, "git", arguments); if (result.Code != 0) throw new InvalidOperationException("Git operation failed"); return result.Output; }
 async Task Commit()
 {
-    await Git("add", "--", pathspec);
-    if ((await Git("status", "--porcelain", "--", pathspec)).Length > 0)
-        await Git("commit", "--quiet", "--only", "-m", "Factory pass", "--", pathspec);
+    await Git("add", "--", pathspec, excludeState);
+    if ((await Git("status", "--porcelain", "--", pathspec, excludeState)).Length > 0)
+        await Git("commit", "--quiet", "--only", "-m", "Factory pass", "--", pathspec, excludeState);
 }
 async Task<string> WorkChanges()
 {
@@ -116,14 +152,15 @@ try
         {
             var recordCommittedTask = awaitingCommit;
             if (recordCommittedTask) { await Commit(); awaitingCommit = false; }
+            var previousPlan = recordCommittedTask && File.Exists(plan) ? File.ReadAllText(plan) : "";
             var instruction = recordCommittedTask
                 ? "Record the committed task: update the plan now to mark exactly the first unfinished task done. Preserve every other task and its findings and subtasks. Do not report completion until this update is written to disk."
                 : "If the plan is missing, create a few tasks from the seed without doing product work. Otherwise inspect it; if task statuses are unclear, clarify them in the plan without changing the tasks.";
             instruction += " Make each task's done or unfinished state explicit in the plan. Report complete: true only if every task is marked done; otherwise report complete: false.";
             result = await Call(current, $"{context}\n{instruction}\nChange only the plan, never product code. {request}");
-            if (recordCommittedTask && (await Git("diff", "HEAD", "--", planPathspec)).Length == 0)
+            if (recordCommittedTask && File.ReadAllText(plan) == previousPlan)
                 throw new InvalidOperationException("planner did not update the plan after committed work");
-            if (!hadPlan) { await Commit(); hadPlan = true; }
+            if (!hadPlan) hadPlan = true;
             attempt = 0; findings = "[]";
         }
         else if (current == "doer")
@@ -137,7 +174,7 @@ try
             var lens = Option("--lens") ?? machines[current].Lens;
             var guidance = lens.Equals("testability", StringComparison.OrdinalIgnoreCase) ? "Look for logic testable independently of terminal I/O, time and randomness." : "";
             var changes = await WorkChanges();
-            result = await Call(current, $"Review only the current task's product changes below, through this lens: {lens}. {guidance}\nReport findings only: change neither plan nor product files, and do not commit. {request} Include array \"findings\".\nCurrent task changes:\n{changes}");
+            result = await Call(current, $"{context}\nReview only the current task's product changes below, through this lens: {lens}. {guidance}\nReport findings only: change neither plan nor product files, and do not commit. {request} Include array \"findings\".\nCurrent task changes:\n{changes}");
             if (!result.TryGetProperty("findings", out var reported) || reported.ValueKind != JsonValueKind.Array) throw new InvalidOperationException("could not read the validator's result");
             findings = reported.GetRawText();
         }
