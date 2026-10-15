@@ -1,0 +1,11 @@
+{
+  "name": "impact-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test functional-tests/*.test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0"
+  }
+}
