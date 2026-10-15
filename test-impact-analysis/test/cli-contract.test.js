@@ -14,8 +14,15 @@ import {
   generateJsonReport,
   runWorkflow,
   main,
+  isProductionJsFile,
+  getChangedProductionFiles,
+  getFileContentAtCommit,
+  parseFunctionRanges,
+  getDiffLineRanges,
+  locateChangedFunctions,
 } from '../bin/test-impact-analysis.js';
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, readFileSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -384,7 +391,7 @@ describe('runWorkflow validation', () => {
 });
 
 describe('runWorkflow success', () => {
-  it('writes html and json placeholders', async () => {
+  it('writes empty html and json reports', async () => {
     const files = {};
     const execGit = (cwd, args) => {
       if (args.includes('cat-file')) return 'commit';
@@ -500,5 +507,267 @@ describe('main', () => {
       }),
       (err) => err instanceof Error && !(err instanceof ValidationError),
     );
+  });
+});
+
+describe('isProductionJsFile', () => {
+  it('accepts regular .js files', () => {
+    assert.strictEqual(isProductionJsFile('src/game.js'), true);
+    assert.strictEqual(isProductionJsFile('lib/helpers.js'), true);
+  });
+
+  it('rejects non-.js files', () => {
+    assert.strictEqual(isProductionJsFile('README.md'), false);
+    assert.strictEqual(isProductionJsFile('src/styles.css'), false);
+  });
+
+  it('rejects node_modules', () => {
+    assert.strictEqual(isProductionJsFile('node_modules/lodash/index.js'), false);
+    assert.strictEqual(isProductionJsFile('vendor/node_modules/foo.js'), false);
+  });
+
+  it('rejects test files', () => {
+    assert.strictEqual(isProductionJsFile('src/game.test.js'), false);
+    assert.strictEqual(isProductionJsFile('src/game.spec.js'), false);
+    assert.strictEqual(isProductionJsFile('tests/regression.test.js'), false);
+    assert.strictEqual(isProductionJsFile('__tests__/unit.js'), false);
+  });
+
+  it('rejects generated files', () => {
+    assert.strictEqual(isProductionJsFile('dist/app.bundle.js'), false);
+    assert.strictEqual(isProductionJsFile('src/app.min.js'), false);
+    assert.strictEqual(isProductionJsFile('types/index.d.ts'), false);
+  });
+});
+
+describe('parseFunctionRanges', () => {
+  it('finds exported and non-exported functions', () => {
+    const code = 'export function a() {}\nfunction b() {\n  return 1;\n}';
+    const result = parseFunctionRanges(code);
+    assert.strictEqual(result.length, 2);
+    assert.strictEqual(result[0].name, 'a');
+    assert.strictEqual(result[0].startLine, 1);
+    assert.strictEqual(result[0].endLine, 1);
+    assert.strictEqual(result[1].name, 'b');
+    assert.strictEqual(result[1].startLine, 2);
+    assert.strictEqual(result[1].endLine, 4);
+  });
+
+  it('finds indented function declarations', () => {
+    const code = 'if (true) {\n  function inner() {\n    return 1;\n  }\n}';
+    const result = parseFunctionRanges(code);
+    assert.strictEqual(result.length, 1);
+    assert.strictEqual(result[0].name, 'inner');
+    assert.strictEqual(result[0].startLine, 2);
+    assert.strictEqual(result[0].endLine, 4);
+  });
+
+  it('handles nested braces correctly', () => {
+    const code = 'function outer() {\n  if (true) {\n    return 1;\n  }\n}';
+    const result = parseFunctionRanges(code);
+    assert.strictEqual(result.length, 1);
+    assert.strictEqual(result[0].name, 'outer');
+    assert.strictEqual(result[0].startLine, 1);
+    assert.strictEqual(result[0].endLine, 5);
+  });
+
+  it('returns empty array for code without functions', () => {
+    const result = parseFunctionRanges('const x = 1;\nexport const y = 2;');
+    assert.deepStrictEqual(result, []);
+  });
+
+  it('handles braces inside strings', () => {
+    const code = 'function a() {\n  const s = "{";\n  return s;\n}';
+    const result = parseFunctionRanges(code);
+    assert.strictEqual(result.length, 1);
+    assert.strictEqual(result[0].name, 'a');
+    assert.strictEqual(result[0].endLine, 4);
+  });
+
+  it('parses real Tetris game.js', () => {
+    const code = readFileSync(new URL('../../tetris/tetris-002/game.js', import.meta.url), 'utf-8');
+    const result = parseFunctionRanges(code);
+    const names = result.map(r => r.name);
+    assert.ok(names.includes('createEmptyBoard'));
+    assert.ok(names.includes('createGameState'));
+    assert.ok(names.includes('collides'));
+    assert.ok(names.includes('tick'));
+    assert.ok(names.includes('movePiece'));
+    assert.ok(names.includes('clearLines'));
+  });
+
+  it('parses real Tetris pieces.js with large nested objects', () => {
+    const code = readFileSync(new URL('../../tetris/tetris-002/pieces.js', import.meta.url), 'utf-8');
+    const result = parseFunctionRanges(code);
+    const names = result.map(r => r.name);
+    assert.deepStrictEqual(names, ['getShape', 'getColor', 'createPiece', 'getWallKicks']);
+  });
+});
+
+describe('getDiffLineRanges', () => {
+  it('parses git diff -U0 output', () => {
+    const execGit = () => `@@ -10,5 +12,3 @@\n context\n@@ -25,1 +23,4 @@\n more`;
+    const result = getDiffLineRanges('/repo', 'base', 'head', 'file.js', execGit);
+    assert.deepStrictEqual(result.baseRanges, [{ start: 10, end: 14 }, { start: 25, end: 25 }]);
+    assert.deepStrictEqual(result.headRanges, [{ start: 12, end: 14 }, { start: 23, end: 26 }]);
+  });
+
+  it('returns empty ranges when diff is empty', () => {
+    const execGit = () => null;
+    const result = getDiffLineRanges('/repo', 'base', 'head', 'file.js', execGit);
+    assert.deepStrictEqual(result.baseRanges, []);
+    assert.deepStrictEqual(result.headRanges, []);
+  });
+
+  it('handles added lines at start', () => {
+    const execGit = () => '@@ -0,0 +1,5 @@';
+    const result = getDiffLineRanges('/repo', 'base', 'head', 'file.js', execGit);
+    assert.deepStrictEqual(result.baseRanges, []);
+    assert.deepStrictEqual(result.headRanges, [{ start: 1, end: 5 }]);
+  });
+
+  it('handles removed lines at start', () => {
+    const execGit = () => '@@ -1,5 +0,0 @@';
+    const result = getDiffLineRanges('/repo', 'base', 'head', 'file.js', execGit);
+    assert.deepStrictEqual(result.baseRanges, [{ start: 1, end: 5 }]);
+    assert.deepStrictEqual(result.headRanges, []);
+  });
+});
+
+describe('locateChangedFunctions', () => {
+  it('identifies added, modified, and removed functions in a temp repo', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tia-test-'));
+    execSync('git init', { cwd: dir });
+    execSync('git config user.email "test@test.com"', { cwd: dir });
+    execSync('git config user.name "Test"', { cwd: dir });
+
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'game.js'), 'export function a() { return 1; }\nexport function b() { return 2; }\n');
+    execSync('git add .', { cwd: dir });
+    execSync('git commit -m base', { cwd: dir });
+    const baseCommit = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf-8' }).trim();
+
+    writeFileSync(join(dir, 'src', 'game.js'), 'export function a() { return 10; }\nexport function c() { return 3; }\n');
+    execSync('git add .', { cwd: dir });
+    execSync('git commit -m head', { cwd: dir });
+    const headCommit = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf-8' }).trim();
+
+    const execGit = createExecGit(execSync);
+    const result = locateChangedFunctions(dir, baseCommit, headCommit, join(dir, 'src'), execGit);
+
+    const names = result.changedFunctions.map(f => `${f.changeType}:${f.name}`);
+    assert.ok(names.includes('modified:a'), `expected modified:a in ${names}`);
+    assert.ok(names.includes('removed:b'), `expected removed:b in ${names}`);
+    assert.ok(names.includes('added:c'), `expected added:c in ${names}`);
+    assert.strictEqual(result.changedFunctions.length, 3);
+    assert.deepStrictEqual(result.uncertainAreas, []);
+
+    rmSync(dir, { recursive: true });
+  });
+
+  it('reports uncertain when a change is outside any named function', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tia-test-'));
+    execSync('git init', { cwd: dir });
+    execSync('git config user.email "test@test.com"', { cwd: dir });
+    execSync('git config user.name "Test"', { cwd: dir });
+
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'game.js'), 'const X = 1;\nexport function a() { return X; }\n');
+    execSync('git add .', { cwd: dir });
+    execSync('git commit -m base', { cwd: dir });
+    const baseCommit = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf-8' }).trim();
+
+    writeFileSync(join(dir, 'src', 'game.js'), 'const X = 2;\nexport function a() { return X; }\n');
+    execSync('git add .', { cwd: dir });
+    execSync('git commit -m head', { cwd: dir });
+    const headCommit = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf-8' }).trim();
+
+    const execGit = createExecGit(execSync);
+    const result = locateChangedFunctions(dir, baseCommit, headCommit, join(dir, 'src'), execGit);
+
+    assert.strictEqual(result.changedFunctions.length, 0);
+    assert.strictEqual(result.uncertainAreas.length, 1);
+    assert.ok(result.uncertainAreas[0].module.endsWith('src/game.js'));
+    assert.ok(result.uncertainAreas[0].reason.includes('outside a named function'));
+
+    rmSync(dir, { recursive: true });
+  });
+
+  it('returns empty result when no production files changed', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tia-test-'));
+    execSync('git init', { cwd: dir });
+    execSync('git config user.email "test@test.com"', { cwd: dir });
+    execSync('git config user.name "Test"', { cwd: dir });
+
+    writeFileSync(join(dir, 'README.md'), '# hello\n');
+    execSync('git add .', { cwd: dir });
+    execSync('git commit -m base', { cwd: dir });
+    const baseCommit = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf-8' }).trim();
+
+    writeFileSync(join(dir, 'README.md'), '# world\n');
+    execSync('git add .', { cwd: dir });
+    execSync('git commit -m head', { cwd: dir });
+    const headCommit = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf-8' }).trim();
+
+    const execGit = createExecGit(execSync);
+    const result = locateChangedFunctions(dir, baseCommit, headCommit, dir, execGit);
+
+    assert.deepStrictEqual(result.changedFunctions, []);
+    assert.deepStrictEqual(result.uncertainAreas, []);
+
+    rmSync(dir, { recursive: true });
+  });
+});
+
+describe('runWorkflow with changed functions', () => {
+  it('populates changedFunctions and uncertainAreas in JSON output', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tia-test-'));
+    execSync('git init', { cwd: dir });
+    execSync('git config user.email "test@test.com"', { cwd: dir });
+    execSync('git config user.name "Test"', { cwd: dir });
+
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'game.js'), 'export function a() { return 1; }\n');
+    execSync('git add .', { cwd: dir });
+    execSync('git commit -m base', { cwd: dir });
+    const baseCommit = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf-8' }).trim();
+
+    writeFileSync(join(dir, 'src', 'game.js'), 'export function a() { return 2; }\n');
+    execSync('git add .', { cwd: dir });
+    execSync('git commit -m head', { cwd: dir });
+    const headCommit = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf-8' }).trim();
+
+    const files = {};
+    const logs = [];
+
+    await runWorkflow({
+      baseCommit,
+      headCommit,
+      sourcePath: 'src',
+      reportPath: 'report.html',
+      toolDir: dir,
+      deps: {
+        exists: (p) => p === join(dir, '.git'),
+        execSyncImpl: execSync,
+        mkdirImpl: async () => {},
+        writeFileImpl: async (path, content) => {
+          files[path] = content;
+        },
+        log: (msg) => logs.push(msg),
+      },
+    });
+
+    const jsonPayload = JSON.parse(files[join(dir, 'report.json')]);
+    assert.strictEqual(jsonPayload.changedFunctions.length, 1);
+    assert.strictEqual(jsonPayload.changedFunctions[0].name, 'a');
+    assert.strictEqual(jsonPayload.changedFunctions[0].changeType, 'modified');
+    assert.deepStrictEqual(jsonPayload.uncertainAreas, []);
+
+    const html = files[join(dir, 'report.html')];
+    assert.ok(html.includes('Changed Functions'));
+    assert.ok(html.includes('a'));
+    assert.ok(html.includes('modified'));
+
+    rmSync(dir, { recursive: true });
   });
 });
