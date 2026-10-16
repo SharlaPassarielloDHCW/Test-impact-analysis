@@ -1,49 +1,48 @@
-# Plan: test-impact-analysis iteration 001 — code impact
+# Plan: test-impact-analysis iteration 002 — Task Desk test selection
 
 ## Current state
 
-Iteration 001 is implemented. The CLI reads committed JavaScript with Acorn,
-identifies changed named functions, follows direct and transitive callers,
-and writes matching HTML and JSON reports. Unsupported calls and changes are
-reported as uncertain. Test mapping and test execution remain later iterations.
+Iteration 002 is implemented. The analyzer reads committed changes in
+`impact-demo/` by default, discovers individual `node:test` cases in
+`impact-demo/functional-tests/`, and writes selection decisions to the HTML
+and JSON reports. It recommends linked and uncertain cases and explains
+excluded cases. It does not execute the selected cases; that belongs to
+iteration 003.
 
-Verification: `npm test --prefix test-impact-analysis` passes 67 tests, including
-acceptance checks in temporary Git repositories. See `../README.md` for usage
-and supported syntax. Changes are ready for review and are not committed.
+This is the capstone progress record. The C# factory stores its own run plans
+under `factory/runs/<run-name>/plan.md`. Its existing `tetris` run remains a
+separate practice run; a capstone run targets `test-impact-analysis/` and uses
+an iteration goal as its seed.
 
 ## Tasks
 
-- [x] **Finish the CLI contract**
-  - Accept base and head commits, source subtree, and HTML report path.
-  - Resolve paths against the containing Git repository and validate inputs.
-  - Fail clearly without writing a success report when inputs or output are invalid.
-  - [x] Export `escapeHtml` and add targeted unit tests for HTML metacharacter escaping.
-  - [x] Extract JSON report path derivation into a named helper with isolated edge-case tests.
-  - [x] Strengthen `runWorkflow` success test to parse and assert JSON shape, and verify HTML escaping with malicious inputs.
+- [x] **Discover test cases from the head commit**
+  - Find named `node:test` cases in the source subtree and retain their file,
+    title, and location.
+  - Report discovery issues for cases that cannot be classified safely.
 
-- [x] **Locate changed production functions**
-  - Compare the two commits within the source subtree.
-  - Identify added, modified, and removed named JavaScript functions.
-  - Record unresolved changes at module level as uncertain.
+- [x] **Connect cases to code impact**
+  - Follow supported named imports and direct calls from each case to changed
+    or impacted production functions.
+  - Preserve the production call path for each confirmed link.
 
-- [x] **Map direct and transitive callers**
-  - Parse the named ES module imports, exports, functions, and direct calls used by Tetris.
-  - Resolve cross-module calls and follow callers of changed functions.
-  - Record a concrete call path for each impacted function and uncertainty for unresolved calls.
+- [x] **Decide and explain selection**
+  - Recommend confirmed linked cases and cases with uncertain relationships.
+  - Explain why every other discovered case is excluded.
 
-- [x] **Write the code-impact outputs**
-  - Generate a self-contained HTML report of changes, impacts, paths, and uncertainty.
-  - Write the matching JSON map beside it with stable ordering.
-  - Show an explicit empty result when nothing in the source subtree changed.
+- [x] **Publish the selection**
+  - Include every case's decision, reason, and links in HTML and JSON reports.
+  - Attach Task Desk case IDs and descriptions from `test-cases.json`.
 
-- [x] **Verify the first slice**
-  - Check direct, transitive, cross-module, uncertain, empty-change, and invalid-input examples.
-  - Run acceptance checks in a temporary Git repository independent of this repository's history.
+- [x] **Verify the iteration**
+  - Cover discovery, direct and transitive links, uncertainty, exclusions,
+    metadata, and committed-content behavior in analyzer tests.
+  - Verify the 50 Task Desk functional cases and their metadata catalog.
 
-## Verification notes
+## Verification
 
-- Sample report: `reports/code-impact.html` and matching JSON, comparing Tetris
-  commits `522dc8a` and `b392f0f` (generated reports are ignored by Git).
-- The separate `factory/` project is at `003 WIP`. Its required `dotnet test`
-  check currently reports 3 passing and 41 failing scenarios, with missing
-  step definitions. No factory source or specification was changed here.
+- `npm test --prefix test-impact-analysis`: 71 passed.
+- `npm test --prefix impact-demo`: 50 passed.
+- `bin/factory --run test-impact-analysis-002 --target test-impact-analysis --line careful --seed test-impact-analysis/iterations/002-goal.md --check-line`: assembly line accepted.
+
+The earlier iteration 001 plan is preserved at `../iterations/001-plan.md`.

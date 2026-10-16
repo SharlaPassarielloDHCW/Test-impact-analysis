@@ -8,6 +8,20 @@ bin/factory --run tetris --target tetris/tetris-003 --line careful --seed tetris
 
 Resume it with `bin/factory --run tetris`. The first invocation saves its settings in `factory/runs/tetris/run.json` and its plan in `factory/runs/tetris/plan.md`. Run state is ignored by Git. The existing Tetris run has already been migrated and its plan is complete; use a new run name and target to build again.
 
+For the test impact analysis capstone, the factory target is
+`test-impact-analysis/`, and an iteration goal is its seed. Task Desk in
+`impact-demo/` is the application analyzed by that target. For example, check
+the capstone line with:
+
+```sh
+bin/factory --run test-impact-analysis-002 --target test-impact-analysis \
+  --line careful --seed test-impact-analysis/iterations/002-goal.md --check-line
+```
+
+Start an actual run by removing `--check-line`. Use a fresh run name and the
+appropriate goal file for each new iteration. An existing run keeps its saved
+seed and target, so the old `tetris` run cannot be repointed to the capstone.
+
 The target owns its Graphviz lines in `.assembly-lines/`, such as `careful.dot`, `quick.dot` and `three-brains.dot`, and machine configurations in `.assembly-lines/.machines/<name>/config.json`. `quick` routes the doer straight to the planner; `careful` uses the validator. `three-brains` starts three reviewers together, then passes their JSON results to a synthesiser. A reviewer failure stops the run before synthesis or commit. Check the line without calling an agent:
 
 ```sh

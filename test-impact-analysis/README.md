@@ -32,8 +32,21 @@ To reproduce the current local reports, use `--base 402dbc4 --head HEAD`:
 that comparison includes the first addition of the website code. For later,
 focused changes, compare the commit before the website edit with the commit
 containing it. Reports in `reports/` are generated locally and ignored by Git.
-The `iterations/` goal files retain the earlier Tetris exercise as history;
-they do not set the CLI's current target.
+The iteration goals and the CLI both target Task Desk. The factory builds the
+analyzer in `test-impact-analysis/` using an iteration goal as its seed; the
+analyzer reads changes in `impact-demo/` using `--source impact-demo` (or its
+default). The factory's old `tetris` run is a separate practice run.
+
+To check the capstone assembly line without starting an agent run:
+
+```sh
+bin/factory --run test-impact-analysis-002 --target test-impact-analysis \
+  --line careful --seed test-impact-analysis/iterations/002-goal.md --check-line
+```
+
+For a new iteration, use a new run name and that iteration's goal as the seed.
+Factory run plans live in `factory/runs/<run-name>/plan.md`; the checked
+`.factory/plan.md` is the capstone's human-readable progress record.
 
 ## Reading the report
 
